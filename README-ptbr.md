@@ -150,9 +150,9 @@ Antes mesmo de o pagamento chegar ao banco, extraímos **6 sinais matemáticos f
    - *O que significa "Corredor" (`corridor`)?* No jargão bancário, um **corredor de pagamento** (representado no nosso banco pela coluna `merchant_category`, de `1` a `50`) é simplesmente o **ramo de atividade ou canal comercial** por onde o dinheiro está passando: por exemplo, no ramo de **Padarias e Cafeterias**, a média normal de um PIX nas últimas 24h ($\mu_{\text{corredor}}$) é **R\$ 25,00**; já no ramo de **Concessionárias de Veículos**, a média normal é **R\$ 45.000,00**. Enviar R\$ 15.000,00 é esperado em uma concessionária, mas é uma anomalia grave em uma padaria.
    - O **Escore-Z** mede quantos desvios-padrão ($\sigma$, a variação típica dos valores ao redor da média) o valor do PIX atual está acima da média normal das últimas 24 horas ($\mu_{\text{corredor}}$) daquele ramo de comércio específico:
 
-   $$
+   ```math
    Z = \frac{\text{Valor} - \mu_{\text{corredor}}}{\sigma_{\text{corredor}}}
-   $$
+   ```
 
    (Cliente normal: `-0,8 a +1,1`; Ataque de fraude: `+2,0 a +5,5` desvios-padrão acima do normal daquele ramo).
 
@@ -168,9 +168,9 @@ Pense neste passo como um **equalizador musical**: pegamos 6 notas simples (as 6
 1. **Posições `0..47` (48 Harmônicos de Fourier em Múltiplas Frequências):**
    Para cada uma das 4 frequências harmônicas de onda $f \in \{1, 2, 3, 4\}$, calculamos o seno e o cosseno de todos os 6 sinais escalados por $0.5 \cdot f$:
 
-   $$
+   ```math
    \mathbf{h}_f = \Big[\sin(0.5 \cdot f \cdot \mathbf{x}),\; \cos(0.5 \cdot f \cdot \mathbf{x})\Big] \in \mathbb{R}^{12} \quad \Longrightarrow \quad 4 \times 12 = 48\text{ dimensões}
-   $$
+   ```
 
    *Por que isso funciona na matemática:* Pelo Teorema de Bochner, expandir números em ondas de seno e cosseno faz com que o produto escalar simples (Similaridade de Cosseno) aproxime um *Kernel Gaussiano RBF* (uma fronteira curva suave usada em Machine Learning), transformando curvas complexas em ângulos retos fáceis de medir.
 
@@ -179,36 +179,36 @@ Pense neste passo como um **equalizador musical**: pegamos 6 notas simples (as 6
 2. **Posições `48..63` (16 Termos Polinomiais Cruzados e Ativações de Tangente Hiperbólica):**
    - **6 Produtos Cruzados de Segunda Ordem (`Posições 48..53`):** Multiplicam os fatores de risco dois a dois para capturar picos simultâneos:
 
-      $$
-      \text{velocity} \times \text{zscore},\quad \text{velocity} \times \text{geo},\quad \text{velocity} \times \text{degree},\quad \text{zscore} \times \text{geo},\quad \text{zscore} \times \text{degree},\quad \text{geo} \times \text{degree}
-      $$
+     ```math
+     \text{velocity} \times \text{zscore},\quad \text{velocity} \times \text{geo},\quad \text{velocity} \times \text{degree},\quad \text{zscore} \times \text{geo},\quad \text{zscore} \times \text{degree},\quad \text{geo} \times \text{degree}
+     ```
 
    - **6 Modulações de Horário Noturno (`Posições 54..59`):** Cruzam o seno e o cosseno da hora da transação com a velocidade de gasto, o Escore-Z do valor e a velocidade geográfica:
 
-      $$
-      \sin(\text{hora})\cdot\text{velocity},\; \cos(\text{hora})\cdot\text{velocity},\; \sin(\text{hora})\cdot\text{zscore},\; \cos(\text{hora})\cdot\text{zscore},\; \sin(\text{hora})\cdot\text{geo},\; \cos(\text{hora})\cdot\text{geo}
-      $$
+     ```math
+     \sin(\text{hora})\cdot\text{velocity},\; \cos(\text{hora})\cdot\text{velocity},\; \sin(\text{hora})\cdot\text{zscore},\; \cos(\text{hora})\cdot\text{zscore},\; \sin(\text{hora})\cdot\text{geo},\; \cos(\text{hora})\cdot\text{geo}
+     ```
 
    - **4 Ativações Não-Lineares de Saturação (`Posições 60..63`):** Aplicam a Tangente Hiperbólica ($\tanh$, uma curva suave em "S" que comprime qualquer número extremo para a faixa `[-1.0, +1.0]`) para que um único valor gigante não domine todas as 64 dimensões:
 
-      $$
-      \tanh(\text{velocity} + \text{zscore}),\quad \tanh(\text{geo} + \text{degree}),\quad \sin(\text{velocity}\cdot\text{degree}),\quad \cos(\text{zscore}\cdot\text{geo})
-      $$
+     ```math
+     \tanh(\text{velocity} + \text{zscore}),\quad \tanh(\text{geo} + \text{degree}),\quad \sin(\text{velocity}\cdot\text{degree}),\quad \cos(\text{zscore}\cdot\text{geo})
+     ```
 
    ![Cruzamentos de Pistas e o Funil Mágico tanh nas Posições 48..63](./docs/assets/illustration-math-cross-tanh-ptbr.png)
 
 3. **Normalização L2 na Hiperesfera Unitária (Todas as Setas com Tamanho `1.0`):**
    Imagine encolher ou esticar todas as setas para que tenham **exatamente o mesmo comprimento (`1.0`)**, assim só a *direção* importa na hora de comparar. Dividimos o vetor $\mathbf{r}$ pelo seu comprimento euclidiano $\lVert \mathbf{r} \rVert_2$:
 
-   $$
+   ```math
    \hat{\mathbf{v}} = \frac{\mathbf{r}}{\lVert \mathbf{r} \rVert_2} = \frac{\mathbf{r}}{\sqrt{\sum_{i=1}^{64} r_i^2}}, \quad \lVert \hat{\mathbf{v}} \rVert_2 = 1.0
-   $$
+   ```
 
    Com comprimento `1.0`, a **Similaridade de Cosseno** entre o PIX atual $\hat{\mathbf{v}}$ e uma fraude $\hat{\mathbf{s}}$ dentro do `alloydb_scann` é o próprio cosseno do ângulo $\theta$ entre eles:
 
-   $$
+   ```math
    \text{Similaridade de Cosseno}(\hat{\mathbf{v}}, \hat{\mathbf{s}}) = 1.0 - d_{\cos}(\hat{\mathbf{v}}, \hat{\mathbf{s}}) = \hat{\mathbf{v}} \cdot \hat{\mathbf{s}} = \cos(\theta) \in [-1.0, 1.0]
-   $$
+   ```
 
    ![Normalização L2: Todas as Setas no Círculo de Raio 1,0](./docs/assets/illustration-math-l2-normalize-ptbr.png)
 
@@ -222,15 +222,15 @@ Em vez de somar ruído aleatório imprevisível, o método `BehavioralVectorProj
 1. Sorteia um vetor aleatório de 64 números $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{64})$ (64 números sorteados de uma curva normal padrão com média `0` e desvio-padrão `1`).
 2. Subtrai a projeção de $\mathbf{z}$ sobre $\hat{\mathbf{u}}$ e normaliza para obter uma seta unitária $\hat{\mathbf{u}}_{\perp}$ a exatos **90 graus** ($\hat{\mathbf{u}} \cdot \hat{\mathbf{u}}_{\perp} = 0$):
 
-   $$
+   ```math
    \mathbf{p} = \mathbf{z} - (\mathbf{z} \cdot \hat{\mathbf{u}})\hat{\mathbf{u}}, \quad \hat{\mathbf{u}}_{\perp} = \frac{\mathbf{p}}{\lVert \mathbf{p} \rVert_2}
-   $$
+   ```
 
 3. Mistura as duas setas usando o cosseno alvo exato $\alpha = \cos(\theta)$:
 
-   $$
+   ```math
    \hat{\mathbf{v}}_{\text{mutado}} = \alpha \cdot \hat{\mathbf{u}} + \sqrt{1 - \alpha^2} \cdot \hat{\mathbf{u}}_{\perp}
-   $$
+   ```
 
    Como $\cos^2\theta + \sin^2\theta = 1$, o vetor $\hat{\mathbf{v}}_{\text{mutado}}$ mantém comprimento `1.0` e tem **Similaridade de Cosseno exata igual a $\alpha$** (com precisão de 6 casas decimais) em relação a $\hat{\mathbf{u}}$.
 
@@ -240,9 +240,9 @@ Em vez de somar ruído aleatório imprevisível, o método `BehavioralVectorProj
 
 No Estágio 3 (`risk_eval`) da query [`sql/queries/hot_path_authorize.sql`](./sql/queries/hot_path_authorize.sql), o banco de dados combina as agregações de 24 horas do Motor Colunar com a similaridade das 10 fraudes mais próximas do `alloydb_scann` na nota final de risco $R \in [0.0, 1.0]$ usando uma **Equação Linear por Partes com Disjuntor Não-Linear**:
 
-$$
+```math
 R = \min\left(1.0,\; \max\Big(\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}},\;\; 0.35 \cdot V_{24h} + 0.15 \cdot D_{24h} + 0.50 \cdot S_{\text{vec}}\Big)\right)
-$$
+```
 
 Onde cada termo é definido por:
 - **$V_{24h} = \min\left(1.0,\; \frac{\text{gasto}_{24h}}{5.000.000}\right)$ (`sum_24h_cents`, Peso `0,35`):** Atinge o teto `1.0` quando o acumulado enviado pela conta nas últimas 24 horas naquele corredor comercial chega a R\$ 50.000 (`5.000.000` centavos).
