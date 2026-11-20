@@ -150,7 +150,7 @@ Before a payment touches the database, we extract **6 core mathematical signals*
    - *What is a "Payment Corridor"?* In banking, a **corridor** (`merchant_category`, numbered `1..50` in our database) simply means the specific **type of business or payment channel**: for example, a bakery or coffee shop (where the 24-hour average transfer $\mu_{\text{corridor}}$ is \$15) versus a car dealership (where the 24-hour average is \$25,000). Sending \$8,000 at a car dealership is normal, but sending \$8,000 at a bakery is a major anomaly.
    - The **Z-Score** measures how many standard deviations ($\sigma$, the typical spread of values around the average) the current payment amount is above the normal 24-hour average ($\mu_{\text{corridor}}$) of that specific business category:
 
-   ![Z-Score Formula](./docs/assets/eq-01-zscore-en.png)
+   <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-01-zscore-en-dark.png"><img alt="Z-Score Formula" src="./docs/assets/eq-01-zscore-en.png" height="44"></picture>
 
    (Normal customer: `-0.8 to +1.1`; Fraudulent attack: `+2.0 to +5.5` standard deviations above that category's norm).
 
@@ -166,7 +166,7 @@ Think of this step like a **music equalizer**: we take 6 simple notes (the 6 clu
 1. **Dimensions `0..47` (48 Multi-Frequency Fourier Harmonics):**
    For each of the 4 harmonic wave frequencies `f ∈ {1, 2, 3, 4}`, we compute both the sine and cosine of all 6 core signals scaled by `0.5 · f`:
 
-   ![Fourier Harmonics Equation](./docs/assets/eq-02-fourier-en.png)
+   <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-02-fourier-en-dark.png"><img alt="Fourier Harmonics Equation" src="./docs/assets/eq-02-fourier-en.png" height="40"></picture>
 
    *Why this works mathematically:* By Bochner's theorem, expanding raw numbers into sine and cosine waves lets a simple dot product (Cosine Similarity) approximate a *Gaussian RBF kernel* (a smooth curved decision boundary from machine learning), turning curved boundaries into flat geometric angles.
 
@@ -175,26 +175,26 @@ Think of this step like a **music equalizer**: we take 6 simple notes (the 6 clu
 2. **Dimensions `48..63` (16 Second-Order Cross-Terms and Hyperbolic Tangent Activations):**
    - **6 Pairwise Behavioral Interactions (`Dims 48..53`):** Multiply risk factors in pairs to capture joint spikes:
 
-     ![Pairwise Behavioral Interactions Equation](./docs/assets/eq-03a-pairwise.png)
+     <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-03a-pairwise-dark.png"><img alt="Pairwise Behavioral Interactions Equation" src="./docs/assets/eq-03a-pairwise.png" height="36"></picture>
 
    - **6 Time-of-Night Cross-Modulations (`Dims 54..59`):** Cross the sine and cosine of the transaction hour with spending velocity, amount Z-score, and geographic travel speed:
 
-     ![Time-of-Night Cross-Modulations Equation](./docs/assets/eq-03b-night-en.png)
+     <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-03b-night-en-dark.png"><img alt="Time-of-Night Cross-Modulations Equation" src="./docs/assets/eq-03b-night-en.png" height="68"></picture>
 
    - **4 Non-Linear Saturating Activations (`Dims 60..63`):** Apply the Hyperbolic Tangent (`tanh`, a smooth S-shaped curve that squashes any extreme number into `[-1.0, +1.0]`) so a single outlier cannot dominate all 64 dimensions:
 
-     ![Non-Linear Saturating Activations Equation](./docs/assets/eq-03c-activations.png)
+     <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-03c-activations-dark.png"><img alt="Non-Linear Saturating Activations Equation" src="./docs/assets/eq-03c-activations.png" height="36"></picture>
 
    ![Cross-Terms and the Magic tanh Funnel in Dimensions 48..63](./docs/assets/illustration-math-cross-tanh-en.png)
 
 3. **L2 Unit-Hypersphere Normalization (Every Arrow Has Length `1.0`):**
    Picture shrinking or stretching every arrow so they all have **the exact same length (`1.0`)**, making only their *direction* matter when comparing. We divide **r** by its Euclidean length `||r||₂`:
 
-   ![L2 Normalization Equation](./docs/assets/eq-04-l2-norm.png)
+   <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-04-l2-norm-dark.png"><img alt="L2 Normalization Equation" src="./docs/assets/eq-04-l2-norm.png" height="76"></picture>
 
    With length `1.0`, the **Cosine Similarity** between an incoming payment **v̂** and a stored fraud signature **ŝ** inside `alloydb_scann` is the cosine of the angle `θ` between them:
 
-   ![Cosine Similarity Equation](./docs/assets/eq-05-cosine-en.png)
+   <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-05-cosine-en-dark.png"><img alt="Cosine Similarity Equation" src="./docs/assets/eq-05-cosine-en.png" height="36"></picture>
 
    ![L2 Normalization: Every Arrow on the Unit Circle of Radius 1.0](./docs/assets/illustration-math-l2-normalize-en.png)
 
@@ -208,11 +208,11 @@ Instead of adding unpredictable random noise, `BehavioralVectorProjector.perturb
 1. Draw a random 64-number vector `z ~ N(0, I₆₄)` (64 numbers sampled from a standard normal bell curve with mean `0` and standard deviation `1`).
 2. Subtract its projection onto **û** and normalize to get a unit arrow **û⊥** at an exact **90-degree angle** (`û · û⊥ = 0`):
 
-   ![Gram-Schmidt Orthogonal Projection Equation](./docs/assets/eq-06-gram-schmidt-perp.png)
+   <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-06-gram-schmidt-perp-dark.png"><img alt="Gram-Schmidt Orthogonal Projection Equation" src="./docs/assets/eq-06-gram-schmidt-perp.png" height="44"></picture>
 
 3. Blend both arrows using the exact target cosine `α = cos(θ)`:
 
-   ![Gram-Schmidt Blending Equation](./docs/assets/eq-07-gram-schmidt-blend-en.png)
+   <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-07-gram-schmidt-blend-en-dark.png"><img alt="Gram-Schmidt Blending Equation" src="./docs/assets/eq-07-gram-schmidt-blend-en.png" height="46"></picture>
 
    Because `cos²(θ) + sin²(θ) = 1`, **v̂_mutated** stays length `1.0` with an **exact Cosine Similarity of `α`** (to 6 decimal places) against **û**.
 
@@ -222,7 +222,7 @@ Instead of adding unpredictable random noise, `BehavioralVectorProjector.perturb
 
 Inside Stage 3 (`risk_eval`) of [`sql/queries/hot_path_authorize.sql`](./sql/queries/hot_path_authorize.sql), the database combines the 24-hour Columnar Engine aggregates and the `alloydb_scann` top-10 vector similarity into the final risk score `R ∈ [0.0, 1.0]` using a **Piecewise Linear + Non-Linear Circuit-Breaker Equation**:
 
-![Piecewise Hybrid Risk Scoring Equation](./docs/assets/eq-08-risk-score.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-08-risk-score-dark.png"><img alt="Piecewise Hybrid Risk Scoring Equation" src="./docs/assets/eq-08-risk-score.png" height="38"></picture>
 
 Where each term is defined as:
 - **`V_24h = min(1.0, sum_24h_cents / 5,000,000)` (Weight `0.35`):** Reaches its maximum of `1.0` when the sender's 24-hour cumulative spend in that merchant corridor reaches \$50,000 (`5,000,000` cents).

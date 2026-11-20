@@ -150,7 +150,7 @@ Antes mesmo de o pagamento chegar ao banco, extraímos **6 sinais matemáticos f
    - *O que significa "Corredor" (`corridor`)?* No jargão bancário, um **corredor de pagamento** (representado no nosso banco pela coluna `merchant_category`, de `1` a `50`) é simplesmente o **ramo de atividade ou canal comercial** por onde o dinheiro está passando: por exemplo, no ramo de **Padarias e Cafeterias**, a média normal de um PIX nas últimas 24h ($\mu_{\text{corredor}}$) é **R\$ 25,00**; já no ramo de **Concessionárias de Veículos**, a média normal é **R\$ 45.000,00**. Enviar R\$ 15.000,00 é esperado em uma concessionária, mas é uma anomalia grave em uma padaria.
    - O **Escore-Z** mede quantos desvios-padrão ($\sigma$, a variação típica dos valores ao redor da média) o valor do PIX atual está acima da média normal das últimas 24 horas ($\mu_{\text{corredor}}$) daquele ramo de comércio específico:
 
-   ![Fórmula do Escore-Z](./docs/assets/eq-01-zscore-ptbr.png)
+   <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-01-zscore-ptbr-dark.png"><img alt="Fórmula do Escore-Z" src="./docs/assets/eq-01-zscore-ptbr.png" height="44"></picture>
 
    (Cliente normal: `-0,8 a +1,1`; Ataque de fraude: `+2,0 a +5,5` desvios-padrão acima do normal daquele ramo).
 
@@ -166,7 +166,7 @@ Pense neste passo como um **equalizador musical**: pegamos 6 notas simples (as 6
 1. **Posições `0..47` (48 Harmônicos de Fourier em Múltiplas Frequências):**
    Para cada uma das 4 frequências harmônicas de onda `f ∈ {1, 2, 3, 4}`, calculamos o seno e o cosseno de todos os 6 sinais escalados por `0.5 · f`:
 
-   ![Equação dos Harmônicos de Fourier](./docs/assets/eq-02-fourier-ptbr.png)
+   <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-02-fourier-ptbr-dark.png"><img alt="Equação dos Harmônicos de Fourier" src="./docs/assets/eq-02-fourier-ptbr.png" height="40"></picture>
 
    *Por que isso funciona na matemática:* Pelo Teorema de Bochner, expandir números em ondas de seno e cosseno faz com que o produto escalar simples (Similaridade de Cosseno) aproxime um *Kernel Gaussiano RBF* (uma fronteira curva suave usada em Machine Learning), transformando curvas complexas em ângulos retos fáceis de medir.
 
@@ -175,26 +175,26 @@ Pense neste passo como um **equalizador musical**: pegamos 6 notas simples (as 6
 2. **Posições `48..63` (16 Termos Polinomiais Cruzados e Ativações de Tangente Hiperbólica):**
    - **6 Produtos Cruzados de Segunda Ordem (`Posições 48..53`):** Multiplicam os fatores de risco dois a dois para capturar picos simultâneos:
 
-     ![Equação dos 6 Produtos Cruzados](./docs/assets/eq-03a-pairwise.png)
+     <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-03a-pairwise-dark.png"><img alt="Equação dos 6 Produtos Cruzados" src="./docs/assets/eq-03a-pairwise.png" height="36"></picture>
 
    - **6 Modulações de Horário Noturno (`Posições 54..59`):** Cruzam o seno e o cosseno da hora da transação com a velocidade de gasto, o Escore-Z do valor e a velocidade geográfica:
 
-     ![Equação das 6 Modulações de Horário Noturno](./docs/assets/eq-03b-night-ptbr.png)
+     <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-03b-night-ptbr-dark.png"><img alt="Equação das 6 Modulações de Horário Noturno" src="./docs/assets/eq-03b-night-ptbr.png" height="68"></picture>
 
    - **4 Ativações Não-Lineares de Saturação (`Posições 60..63`):** Aplicam a Tangente Hiperbólica (`tanh`, uma curva suave em "S" que comprime qualquer número extremo para a faixa `[-1.0, +1.0]`) para que um único valor gigante não domine todas as 64 dimensões:
 
-     ![Equação das 4 Ativações Não-Lineares](./docs/assets/eq-03c-activations.png)
+     <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-03c-activations-dark.png"><img alt="Equação das 4 Ativações Não-Lineares" src="./docs/assets/eq-03c-activations.png" height="36"></picture>
 
    ![Cruzamentos de Pistas e o Funil Mágico tanh nas Posições 48..63](./docs/assets/illustration-math-cross-tanh-ptbr.png)
 
 3. **Normalização L2 na Hiperesfera Unitária (Todas as Setas com Tamanho `1.0`):**
    Imagine encolher ou esticar todas as setas para que tenham **exatamente o mesmo comprimento (`1.0`)**, assim só a *direção* importa na hora de comparar. Dividimos o vetor **r** pelo seu comprimento euclidiano `||r||₂`:
 
-   ![Equação da Normalização L2](./docs/assets/eq-04-l2-norm.png)
+   <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-04-l2-norm-dark.png"><img alt="Equação da Normalização L2" src="./docs/assets/eq-04-l2-norm.png" height="76"></picture>
 
    Com comprimento `1.0`, a **Similaridade de Cosseno** entre o PIX atual **v̂** e uma fraude **ŝ** dentro do `alloydb_scann` é o próprio cosseno do ângulo `θ` entre eles:
 
-   ![Equação da Similaridade de Cosseno](./docs/assets/eq-05-cosine-ptbr.png)
+   <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-05-cosine-ptbr-dark.png"><img alt="Equação da Similaridade de Cosseno" src="./docs/assets/eq-05-cosine-ptbr.png" height="36"></picture>
 
    ![Normalização L2: Todas as Setas no Círculo de Raio 1,0](./docs/assets/illustration-math-l2-normalize-ptbr.png)
 
@@ -208,11 +208,11 @@ Em vez de somar ruído aleatório imprevisível, o método `BehavioralVectorProj
 1. Sorteia um vetor aleatório de 64 números `z ~ N(0, I₆₄)` (64 números sorteados de uma curva normal padrão com média `0` e desvio-padrão `1`).
 2. Subtrai a projeção de `z` sobre **û** e normaliza para obter uma seta unitária **û⊥** a exatos **90 graus** (`û · û⊥ = 0`):
 
-   ![Equação da Projeção Ortogonal de Gram-Schmidt](./docs/assets/eq-06-gram-schmidt-perp.png)
+   <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-06-gram-schmidt-perp-dark.png"><img alt="Equação da Projeção Ortogonal de Gram-Schmidt" src="./docs/assets/eq-06-gram-schmidt-perp.png" height="44"></picture>
 
 3. Mistura as duas setas usando o cosseno alvo exato `α = cos(θ)`:
 
-   ![Equação da Mistura de Gram-Schmidt](./docs/assets/eq-07-gram-schmidt-blend-ptbr.png)
+   <picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-07-gram-schmidt-blend-ptbr-dark.png"><img alt="Equação da Mistura de Gram-Schmidt" src="./docs/assets/eq-07-gram-schmidt-blend-ptbr.png" height="46"></picture>
 
    Como `cos²(θ) + sin²(θ) = 1`, o vetor **v̂_mutado** mantém comprimento `1.0` e tem **Similaridade de Cosseno exata igual a `α`** (com precisão de 6 casas decimais) em relação a **û**.
 
@@ -222,7 +222,7 @@ Em vez de somar ruído aleatório imprevisível, o método `BehavioralVectorProj
 
 No Estágio 3 (`risk_eval`) da query [`sql/queries/hot_path_authorize.sql`](./sql/queries/hot_path_authorize.sql), o banco de dados combina as agregações de 24 horas do Motor Colunar com a similaridade das 10 fraudes mais próximas do `alloydb_scann` na nota final de risco `R ∈ [0.0, 1.0]` usando uma **Equação Linear por Partes com Disjuntor Não-Linear**:
 
-![Equação Híbrida de Risco e Disjuntor Não-Linear](./docs/assets/eq-08-risk-score.png)
+<picture><source media="(prefers-color-scheme: dark)" srcset="./docs/assets/eq-08-risk-score-dark.png"><img alt="Equação Híbrida de Risco e Disjuntor Não-Linear" src="./docs/assets/eq-08-risk-score.png" height="38"></picture>
 
 Onde cada termo é definido por:
 - **`V_24h = min(1.0, sum_24h_cents / 5.000.000)` (Peso `0,35`):** Atinge o teto `1.0` quando o acumulado enviado pela conta nas últimas 24 horas naquele corredor comercial chega a R\$ 50.000 (`5.000.000` centavos).
