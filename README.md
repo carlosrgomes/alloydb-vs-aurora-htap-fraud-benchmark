@@ -143,10 +143,10 @@ We do not use random dummy numbers. In [`src/benchmark/feature_generator.py`](./
 
 Before a payment touches the database, we extract **6 core mathematical signals** (written in mathematical notation as $\mathbf{x} \in \mathbb{R}^6$, meaning a list $\mathbf{x}$ of 6 real decimal numbers) that summarize the physics and behavior of the transfer:
 
-1. **$x_1 = \text{velocity\_ratio}$ (24h Spending Acceleration):** How fast the account is spending today divided by its normal daily average (Normal customer: `0.1 to 1.2`; Fraudulent attack: `2.5 to 6.0`).
+1. **$x_1$ = `velocity_ratio` (24h Spending Acceleration):** How fast the account is spending today divided by its normal daily average (Normal customer: `0.1 to 1.2`; Fraudulent attack: `2.5 to 6.0`).
 2. **$x_2 = \sin\left(2\pi \cdot \frac{\text{hour}}{24}\right)$ and $x_3 = \cos\left(2\pi \cdot \frac{\text{hour}}{24}\right)$ (Cyclical Time-of-Day Encoding):**
    - *Why use Sine and Cosine for hours?* In plain numbers, `23:59` (hour 23) and `00:01` (hour 0) look 23 hours apart, even though they are only 2 minutes apart in the middle of the night. Mapping the 24-hour clock onto a unit circle using $(\sin \theta, \cos \theta)$ guarantees that late-night scam hours sit right next to each other geometrically.
-3. **$x_4 = \text{amount\_zscore}$ (Statistical Z-Score of the Transfer Amount vs. the Business Category / "Corridor"):**
+3. **$x_4$ = `amount_zscore` (Statistical Z-Score of the Transfer Amount vs. the Business Category / "Corridor"):**
    - *What is a "Payment Corridor"?* In banking, a **corridor** (`merchant_category`, numbered `1..50` in our database) simply means the specific **type of business or payment channel**: for example, a bakery or coffee shop (where the 24-hour average transfer $\mu_{\text{corridor}}$ is \$15) versus a car dealership (where the 24-hour average is \$25,000). Sending \$8,000 at a car dealership is normal, but sending \$8,000 at a bakery is a major anomaly.
    - The **Z-Score** measures how many standard deviations ($\sigma$, the typical spread of values around the average) the current payment amount is above the normal 24-hour average ($\mu_{\text{corridor}}$) of that specific business category:
 
@@ -156,8 +156,8 @@ Before a payment touches the database, we extract **6 core mathematical signals*
 
    ![Clock on a Circle with Sine & Cosine and Z-Score at Bakery vs Car Dealership](./docs/assets/illustration-math-clock-zscore-en.png)
 
-4. **$x_5 = \text{geo\_velocity\_delta}$ (Physical Travel Speed / "Impossible Travel" in km/h):** The implied physical speed (distance divided by time) between the IP/GPS location of the user's previous transfer and the current one (Normal customer: `0 to 40 km/h`; Fraudulent attack via VPN or emulator jump across states/countries: `300 to 950 km/h`).
-5. **$x_6 = \text{graph\_degree}$ (24h Fan-Out / Device and Receiver Multiplicity):** How many distinct hardware devices and receiver accounts have interacted with this sender in the last 24 hours (Normal customer: `1.0 to 2.5`; Mule or account-takeover ring: `4.0 to 12.0`).
+4. **$x_5$ = `geo_velocity_delta` (Physical Travel Speed / "Impossible Travel" in km/h):** The implied physical speed (distance divided by time) between the IP/GPS location of the user's previous transfer and the current one (Normal customer: `0 to 40 km/h`; Fraudulent attack via VPN or emulator jump across states/countries: `300 to 950 km/h`).
+5. **$x_6$ = `graph_degree` (24h Fan-Out / Device and Receiver Multiplicity):** How many distinct hardware devices and receiver accounts have interacted with this sender in the last 24 hours (Normal customer: `1.0 to 2.5`; Mule or account-takeover ring: `4.0 to 12.0`).
 
 ### 3.2 Mathematical Step 2: Non-Linear 64-D Feature Expansion (`BehavioralVectorProjector.project`)
 
@@ -225,16 +225,16 @@ Inside Stage 3 (`risk_eval`) of [`sql/queries/hot_path_authorize.sql`](./sql/que
 $$R = \min\left(1.0,\; \max\Big(\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}},\;\; 0.35 \cdot V_{24h} + 0.15 \cdot D_{24h} + 0.50 \cdot S_{\text{vec}}\Big)\right)$$
 
 Where each term is defined as:
-- **$V_{24h} = \min\left(1.0,\; \frac{\text{sum\_24h\_cents}}{5,000,000}\right)$ (Weight `0.35`):** Reaches its maximum of `1.0` when the sender's 24-hour cumulative spend in that merchant corridor reaches \$50,000 (`5,000,000` cents).
-- **$D_{24h} = \min\left(1.0,\; \frac{\text{distinct\_devices\_24h}}{5.0}\right)$ (Weight `0.15`):** Reaches its maximum of `1.0` when 5 or more distinct hardware device fingerprints touch the account within 24 hours.
-- **$S_{\text{vec}} = \max_{k \in 1..10} \Big(1.0 - (\text{behavioral\_vec} \mathbin{\lt\!=\!\gt} \text{sig}_k)\Big)$ (Weight `0.50`):** The highest cosine similarity among the top-10 pre-filtered fraud signatures returned by `alloydb_scann`.
+- **$V_{24h} = \min\left(1.0,\; \frac{\text{24h spend}}{5,000,000}\right)$ (`sum_24h_cents`, Weight `0.35`):** Reaches its maximum of `1.0` when the sender's 24-hour cumulative spend in that merchant corridor reaches \$50,000 (`5,000,000` cents).
+- **$D_{24h} = \min\left(1.0,\; \frac{\text{devices}_{24h}}{5.0}\right)$ (`distinct_devices_24h`, Weight `0.15`):** Reaches its maximum of `1.0` when 5 or more distinct hardware device fingerprints touch the account within 24 hours.
+- **$S_{\text{vec}} = \max_{k \in 1..10} \Big(1.0 - d_{\cos}(\mathbf{v}_{\text{tx}},\; \mathbf{v}_{\text{sig},k})\Big)$ (`1.0 - (behavioral_vec <=> sig_k)`, Weight `0.50`):** The highest cosine similarity among the top-10 pre-filtered fraud signatures returned by `alloydb_scann`.
 - **$\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}}$ (The Self-Immunizing Circuit Breaker):**
   Here $\mathbb{I}(\text{condition})$ is an **indicator function** (a simple on/off switch that equals `1` if the condition inside the parentheses is true, and `0` if it is false). Notice why this switch is essential: suppose a brand-new mule account has \$0 spent in the last 24 hours ($V_{24h} = 0$) and only 1 device ($D_{24h} = 0.2$). Without the circuit breaker, even if its vector matched a confirmed fraud signature at $S_{\text{vec}} = 0.95$, the weighted sum alone would be $0.35(0) + 0.15(0.2) + 0.50(0.95) = 0.505$, which would mistakenly approve the fraud. Because of the $\max(\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}}, \dots)$ override, any vector match $\ge 0.92$ bypasses the low velocity weights and jumps straight to $R = 0.95 \ge 0.85$ (`BLOCKED`).
 
 **Decision Thresholds (`inserted_tx` CTE):**
-- **$R < 0.60 \implies \texttt{'APPROVED'}$** (Clean traffic passes in `~5.1 ms` per isolated query).
-- **$0.60 \le R < 0.85 \implies \texttt{'FLAGGED\_GREY\_ZONE'}$** (Enqueued into `agent_triage_outbox` for **Gemini 4 Hydrogen**).
-- **$R \ge 0.85 \implies \texttt{'BLOCKED'}$** (Known or immunized fraud blocked in `~5.1 ms` per isolated query).
+- **$R < 0.60 \implies$ `'APPROVED'`** (Clean traffic passes in `~5.1 ms` per isolated query).
+- **$0.60 \le R < 0.85 \implies$ `'FLAGGED_GREY_ZONE'`** (Enqueued into `agent_triage_outbox` for **Gemini 4 Hydrogen**).
+- **$R \ge 0.85 \implies$ `'BLOCKED'`** (Known or immunized fraud blocked in `~5.1 ms` per isolated query).
 
 > **Sharpen Your Pencil (15-Second Lightning Challenge!)**
 >
@@ -295,7 +295,7 @@ The worker invokes **Gemini 4 Hydrogen** on Vertex AI's **`locations/global`** e
 
 **What Gemini 4 Hydrogen Evaluates and Returns (`AgentAssessment`):**
 Gemini correlates three cross-signals that individually stayed below `0.85`:
-1. **Corridor Outlier Ratio:** $\frac{\text{amount\_cents}}{\text{corridor\_avg\_cents}} = \frac{850,000}{12,500} = 68\times$ above normal store spending in the last 24 hours;
+1. **Corridor Outlier Ratio (`amount_cents / corridor_avg_cents`):** $\frac{850,000}{12,500} = 68\times$ above normal store spending in the last 24 hours;
 2. **Account Drain Velocity and Device Sprawl:** `9` transfers operating the same account across `4` distinct hardware devices (`distinct_devices_24h = 4`);
 3. **Sub-Threshold Vector Script Mutation:** A cosine similarity of `0.8120` shows the transaction behavior is 81.2% similar to a known fraud ring, indicating an attacker slightly altered their script parameters to slip beneath the `0.92` automatic circuit breaker.
 

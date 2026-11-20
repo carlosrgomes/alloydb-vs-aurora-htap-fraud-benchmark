@@ -143,10 +143,10 @@ Não usamos números aleatórios sem sentido. Nos arquivos [`src/benchmark/featu
 
 Antes mesmo de o pagamento chegar ao banco, extraímos **6 sinais matemáticos fundamentais** (representados na notação matemática como $\mathbf{x} \in \mathbb{R}^6$, o que significa uma lista $\mathbf{x}$ contendo 6 números reais com casas decimais) que resumem a física e o comportamento da transferência:
 
-1. **$x_1 = \text{velocity\_ratio}$ (Aceleração de Gasto em 24h):** Razão entre a velocidade de gasto atual da conta e o padrão histórico diário daquele cliente (Cliente normal: `0,1 a 1,2`; Ataque de fraude: `2,5 a 6,0`).
+1. **$x_1$ = `velocity_ratio` (Aceleração de Gasto em 24h):** Razão entre a velocidade de gasto atual da conta e o padrão histórico diário daquele cliente (Cliente normal: `0,1 a 1,2`; Ataque de fraude: `2,5 a 6,0`).
 2. **$x_2 = \sin\left(2\pi \cdot \frac{\text{hora}}{24}\right)$ e $x_3 = \cos\left(2\pi \cdot \frac{\text{hora}}{24}\right)$ (Codificação Cíclica do Horário no Círculo Trigonométrico):**
    - *Por que usar Seno e Cosseno para a hora do dia?* Se usássemos apenas o número da hora (`0` a `23`), um PIX feito às `23:59` (hora 23) e outro feito às `00:01` (hora 0) pareceriam estar a **23 horas de distância** para o computador, quando na verdade aconteceram na mesma madrugada, com apenas 2 minutos de diferença. Ao projetar o relógio em um círculo usando $(\sin \theta, \cos \theta)$, garantimos que `23h` e `00h` fiquem lado a lado geometricamente.
-3. **$x_4 = \text{amount\_zscore}$ (Escore-Z Estatístico do Valor em Relação ao Ramo de Comércio / "Corredor"):**
+3. **$x_4$ = `amount_zscore` (Escore-Z Estatístico do Valor em Relação ao Ramo de Comércio / "Corredor"):**
    - *O que significa "Corredor" (`corridor`)?* No jargão bancário, um **corredor de pagamento** (representado no nosso banco pela coluna `merchant_category`, de `1` a `50`) é simplesmente o **ramo de atividade ou canal comercial** por onde o dinheiro está passando: por exemplo, no ramo de **Padarias e Cafeterias**, a média normal de um PIX nas últimas 24h ($\mu_{\text{corredor}}$) é **R\$ 25,00**; já no ramo de **Concessionárias de Veículos**, a média normal é **R\$ 45.000,00**. Enviar R\$ 15.000,00 é esperado em uma concessionária, mas é uma anomalia grave em uma padaria.
    - O **Escore-Z** mede quantos desvios-padrão ($\sigma$, a variação típica dos valores ao redor da média) o valor do PIX atual está acima da média normal das últimas 24 horas ($\mu_{\text{corredor}}$) daquele ramo de comércio específico:
 
@@ -156,8 +156,8 @@ Antes mesmo de o pagamento chegar ao banco, extraímos **6 sinais matemáticos f
 
    ![Relógio no Círculo com Seno e Cosseno e Escore-Z na Padaria vs Concessionária](./docs/assets/illustration-math-clock-zscore-ptbr.png)
 
-4. **$x_5 = \text{geo\_velocity\_delta}$ (Velocidade Física de Deslocamento / "Viagem Impossível" em km/h):** Calcula a velocidade física implícita (distância dividida pelo tempo) entre a localização (IP/GPS) do último pagamento e a localização do pagamento atual (Cliente normal: `0 a 40 km/h`; Golpista usando VPN ou emulador em outro estado/país: `300 a 950 km/h`).
-5. **$x_6 = \text{graph\_degree}$ (Grau de Dispersão no Grafo em 24h):** Quantos aparelhos celulares e contas recebedoras diferentes interagiram com esta conta nas últimas 24 horas (Cliente normal: `1,0 a 2,5`; Conta laranja ou invasão de conta: `4,0 a 12,0`).
+4. **$x_5$ = `geo_velocity_delta` (Velocidade Física de Deslocamento / "Viagem Impossível" em km/h):** Calcula a velocidade física implícita (distância dividida pelo tempo) entre a localização (IP/GPS) do último pagamento e a localização do pagamento atual (Cliente normal: `0 a 40 km/h`; Golpista usando VPN ou emulador em outro estado/país: `300 a 950 km/h`).
+5. **$x_6$ = `graph_degree` (Grau de Dispersão no Grafo em 24h):** Quantos aparelhos celulares e contas recebedoras diferentes interagiram com esta conta nas últimas 24 horas (Cliente normal: `1,0 a 2,5`; Conta laranja ou invasão de conta: `4,0 a 12,0`).
 
 ### 3.2 Passo Matemático 2: Expansão Não-Linear para 64 Dimensões (`BehavioralVectorProjector.project`)
 
@@ -225,16 +225,16 @@ No Estágio 3 (`risk_eval`) da query [`sql/queries/hot_path_authorize.sql`](./sq
 $$R = \min\left(1.0,\; \max\Big(\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}},\;\; 0.35 \cdot V_{24h} + 0.15 \cdot D_{24h} + 0.50 \cdot S_{\text{vec}}\Big)\right)$$
 
 Onde cada termo é definido por:
-- **$V_{24h} = \min\left(1.0,\; \frac{\text{sum\_24h\_cents}}{5.000.000}\right)$ (Peso `0,35`):** Atinge o teto `1.0` quando o acumulado enviado pela conta nas últimas 24 horas naquele corredor comercial chega a R\$ 50.000 (`5.000.000` centavos).
-- **$D_{24h} = \min\left(1.0,\; \frac{\text{distinct\_devices\_24h}}{5.0}\right)$ (Peso `0,15`):** Atinge o teto `1.0` quando 5 ou mais aparelhos distintos operam a conta em 24 horas.
-- **$S_{\text{vec}} = \max_{k \in 1..10} \Big(1.0 - (\text{behavioral\_vec} \mathbin{\lt\!=\!\gt} \text{sig}_k)\Big)$ (Peso `0,50`):** A maior similaridade de cosseno encontrada entre as 10 assinaturas de fraude pré-filtradas pelo `alloydb_scann`.
+- **$V_{24h} = \min\left(1.0,\; \frac{\text{gasto}_{24h}}{5.000.000}\right)$ (`sum_24h_cents`, Peso `0,35`):** Atinge o teto `1.0` quando o acumulado enviado pela conta nas últimas 24 horas naquele corredor comercial chega a R\$ 50.000 (`5.000.000` centavos).
+- **$D_{24h} = \min\left(1.0,\; \frac{\text{aparelhos}_{24h}}{5.0}\right)$ (`distinct_devices_24h`, Peso `0,15`):** Atinge o teto `1.0` quando 5 ou mais aparelhos distintos operam a conta em 24 horas.
+- **$S_{\text{vec}} = \max_{k \in 1..10} \Big(1.0 - d_{\cos}(\mathbf{v}_{\text{tx}},\; \mathbf{v}_{\text{sig},k})\Big)$ (`1.0 - (behavioral_vec <=> sig_k)`, Peso `0,50`):** A maior similaridade de cosseno encontrada entre as 10 assinaturas de fraude pré-filtradas pelo `alloydb_scann`.
 - **$\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}}$ (O Disjuntor de Autoimunização):**
   Aqui o símbolo $\mathbb{I}(\text{condição})$ é uma **função indicadora** (uma chave liga/desliga matemática que vale `1` quando a condição dentro dos parênteses é verdadeira e `0` quando é falsa). Veja por que essa chave é essencial: imagine uma conta "laranja" recém-aberta que gastou R\$ 0 nas últimas 24 horas ($V_{24h} = 0$) e usou apenas 1 aparelho ($D_{24h} = 0.2$). Sem o disjuntor, mesmo que o vetor do PIX batesse com uma fraude confirmada em $S_{\text{vec}} = 0.95$, a soma ponderada sozinha daria $0.35(0) + 0.15(0.2) + 0.50(0.95) = 0.505$, aprovando a fraude por engano. Com a sobreposição $\max(\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}}, \dots)$, qualquer semelhança vetorial $\ge 0.92$ ignora os pesos baixos do histórico e eleva a nota diretamente para $R = 0.95 \ge 0.85$ (`BLOCKED`).
 
 **Limites de Decisão (`inserted_tx` CTE):**
-- **$R < 0.60 \implies \texttt{'APPROVED'}$** (Tráfego legítimo aprovado em `~5,1 ms` por consulta isolada).
-- **$0.60 \le R < 0.85 \implies \texttt{'FLAGGED\_GREY\_ZONE'}$** (Enfileirado na `agent_triage_outbox` para o **Gemini 4 Hydrogen**).
-- **$R \ge 0.85 \implies \texttt{'BLOCKED'}$** (Fraude conhecida ou imunizada bloqueada em `~5,1 ms` por consulta isolada).
+- **$R < 0.60 \implies$ `'APPROVED'`** (Tráfego legítimo aprovado em `~5,1 ms` por consulta isolada).
+- **$0.60 \le R < 0.85 \implies$ `'FLAGGED_GREY_ZONE'`** (Enfileirado na `agent_triage_outbox` para o **Gemini 4 Hydrogen**).
+- **$R \ge 0.85 \implies$ `'BLOCKED'`** (Fraude conhecida ou imunizada bloqueada em `~5,1 ms` por consulta isolada).
 
 > **Afiando o Lápis (Desafio Relâmpago de 15 Segundos!)**
 >
@@ -295,7 +295,7 @@ O worker invoca o **Gemini 4 Hydrogen** no endpoint **`locations/global`** do Ve
 
 **O Que o Gemini 4 Hydrogen Avalia e Devolve (`AgentAssessment`):**
 O Gemini correlaciona três sinais cruzados que, isoladamente, haviam ficado abaixo de `0,85`:
-1. **Razão de Discrepância no Corredor:** $\frac{\text{amount\_cents}}{\text{corridor\_avg\_cents}} = \frac{850.000}{12.500} = 68\times$ acima do gasto médio daquele ramo comercial nas últimas 24 horas;
+1. **Razão de Discrepância no Corredor (`amount_cents / corridor_avg_cents`):** $\frac{850.000}{12.500} = 68\times$ acima do gasto médio daquele ramo comercial nas últimas 24 horas;
 2. **Velocidade de Drenagem da Conta e Troca de Aparelhos:** `9` transferências operando a mesma conta a partir de `4` aparelhos de hardware diferentes (`distinct_devices_24h = 4`);
 3. **Mutação de Script Vetorial Abaixo do Limiar:** Uma similaridade de cosseno de `0,8120` mostra que o comportamento da transação é 81,2% semelhante a uma quadrilha catalogada, indicando que o atacante alterou parâmetros do script para passar abaixo do disjuntor automático de `0,92`.
 
