@@ -1,0 +1,16 @@
+{
+  "target_mode": "alloydb_row_hnsw",
+  "selectivity_bucket": 500,
+  "selectivity_pct": 50.0,
+  "tps_target": 500,
+  "tps_achieved": 56.7,
+  "p50_ms": 614.14,
+  "p95_ms": 828.15,
+  "p99_ms": 927.2,
+  "recall_at_10": 0.7067,
+  "shared_buffer_hit_ratio": 100.0,
+  "columnar_scan_detected": false,
+  "index_type_detected": "pgvector_hnsw",
+  "total_transactions": 1134,
+  "error_count": 0
+}

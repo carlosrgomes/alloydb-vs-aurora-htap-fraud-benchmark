@@ -1,0 +1,49 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Python Virtual Environments & Bytecode
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Testing & Linting Caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Terraform State & Provider Binaries
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/terraform.tfvars
+**/.terraform.lock.hcl
+
+# OS metadata
+.DS_Store
+
+# Local Security Gate reports (do not publish)
+security-reports/
+
+# Internal planning/audit drafts & GDE sprint spreadsheet (do not publish)
+*.xlsx
+comprehension_report.md
+concepts_brief.md
+critic_report.md
+design_draft.md
+goldfish_review_report.md
+implementation_readiness_report.md
+intermediate_zoom_out_report.md
+zoom_out_report.md
+
+# Keep archived benchmark CSVs & summaries tracked for README links
+!results/raw_telemetry.csv
+!results/**/raw_telemetry.csv

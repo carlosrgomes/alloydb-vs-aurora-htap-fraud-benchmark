@@ -1,0 +1,13 @@
+target_mode,selectivity_bucket,selectivity_pct,tps_target,tps_achieved,p50_ms,p95_ms,p99_ms,recall_at_10,shared_buffer_hit_ratio,columnar_scan_detected,index_type_detected,total_transactions,error_count
+alloydb_col_hnsw,500,50.0,500,253.85,38.89,692.51,946.02,0.7133,100.0,True,pgvector_hnsw,5077,0
+alloydb_col_hnsw,50,5.0,500,485.0,27.79,75.39,96.8,0.68,100.0,True,pgvector_hnsw,9700,0
+alloydb_col_hnsw,5,0.5,500,466.5,32.7,95.26,133.39,0.6733,99.99,True,pgvector_hnsw,9330,0
+alloydb_col_scann,500,50.0,500,317.15,91.19,177.74,212.31,0.9333,100.0,True,alloydb_scann,6343,0
+alloydb_col_scann,50,5.0,500,470.2,37.94,88.29,120.03,1.0,100.0,True,alloydb_scann,9404,0
+alloydb_col_scann,5,0.5,500,486.0,26.71,73.99,95.54,1.0,99.99,True,alloydb_scann,9720,0
+alloydb_row_hnsw,500,50.0,500,56.7,614.14,828.15,927.2,0.7067,100.0,False,pgvector_hnsw,1134,0
+alloydb_row_hnsw,50,5.0,500,51.6,692.19,1003.1,1114.98,0.7,100.0,False,pgvector_hnsw,1032,0
+alloydb_row_hnsw,5,0.5,500,53.9,667.27,918.37,1058.39,0.6733,100.0,False,pgvector_hnsw,1078,0
+aurora_io_hnsw,500,50.0,500,92.5,378.72,508.0,554.21,0.7,100.0,False,pgvector_hnsw,1850,0
+aurora_io_hnsw,50,5.0,500,92.7,375.61,508.32,561.66,0.6867,100.0,False,pgvector_hnsw,1854,0
+aurora_io_hnsw,5,0.5,500,92.2,377.93,510.1,567.21,0.6733,100.0,False,pgvector_hnsw,1844,0

@@ -1,0 +1,16 @@
+{
+  "target_mode": "alloydb_col_scann",
+  "selectivity_bucket": 5,
+  "selectivity_pct": 0.5,
+  "tps_target": 500,
+  "tps_achieved": 489.6,
+  "p50_ms": 5.6,
+  "p95_ms": 9.09,
+  "p99_ms": 11.18,
+  "recall_at_10": 1.0,
+  "shared_buffer_hit_ratio": 99.97,
+  "columnar_scan_detected": true,
+  "index_type_detected": "alloydb_scann",
+  "total_transactions": 4896,
+  "error_count": 0
+}

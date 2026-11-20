@@ -1,0 +1,16 @@
+{
+  "target_mode": "aurora_io_hnsw",
+  "selectivity_bucket": 5,
+  "selectivity_pct": 0.5,
+  "tps_target": 500,
+  "tps_achieved": 486.4,
+  "p50_ms": 11.8,
+  "p95_ms": 29.52,
+  "p99_ms": 37.21,
+  "recall_at_10": 0.6733,
+  "shared_buffer_hit_ratio": 100.0,
+  "columnar_scan_detected": false,
+  "index_type_detected": "pgvector_hnsw",
+  "total_transactions": 4864,
+  "error_count": 0
+}
