@@ -150,7 +150,9 @@ Before a payment touches the database, we extract **6 core mathematical signals*
    - *What is a "Payment Corridor"?* In banking, a **corridor** (`merchant_category`, numbered `1..50` in our database) simply means the specific **type of business or payment channel**: for example, a bakery or coffee shop (where the 24-hour average transfer $\mu_{\text{corridor}}$ is \$15) versus a car dealership (where the 24-hour average is \$25,000). Sending \$8,000 at a car dealership is normal, but sending \$8,000 at a bakery is a major anomaly.
    - The **Z-Score** measures how many standard deviations ($\sigma$, the typical spread of values around the average) the current payment amount is above the normal 24-hour average ($\mu_{\text{corridor}}$) of that specific business category:
 
-   $$Z = \frac{\text{Amount} - \mu_{\text{corridor}}}{\sigma_{\text{corridor}}}$$
+   $$
+   Z = \frac{\text{Amount} - \mu_{\text{corridor}}}{\sigma_{\text{corridor}}}
+   $$
 
    (Normal customer: `-0.8 to +1.1`; Fraudulent attack: `+2.0 to +5.5` standard deviations above that category's norm).
 
@@ -166,7 +168,9 @@ Think of this step like a **music equalizer**: we take 6 simple notes (the 6 clu
 1. **Dimensions `0..47` (48 Multi-Frequency Fourier Harmonics):**
    For each of the 4 harmonic wave frequencies $f \in \{1, 2, 3, 4\}$, we compute both the sine and cosine of all 6 core signals scaled by $0.5 \cdot f$:
 
-   $$\mathbf{h}_f = \Big[\sin(0.5 \cdot f \cdot \mathbf{x}),\; \cos(0.5 \cdot f \cdot \mathbf{x})\Big] \in \mathbb{R}^{12} \quad \Longrightarrow \quad 4 \times 12 = 48\text{ dimensions}$$
+   $$
+   \mathbf{h}_f = \Big[\sin(0.5 \cdot f \cdot \mathbf{x}),\; \cos(0.5 \cdot f \cdot \mathbf{x})\Big] \in \mathbb{R}^{12} \quad \Longrightarrow \quad 4 \times 12 = 48\text{ dimensions}
+   $$
 
    *Why this works mathematically:* By Bochner's theorem, expanding raw numbers into sine and cosine waves lets a simple dot product (Cosine Similarity) approximate a *Gaussian RBF kernel* (a smooth curved decision boundary from machine learning), turning curved boundaries into flat geometric angles.
 
@@ -175,26 +179,36 @@ Think of this step like a **music equalizer**: we take 6 simple notes (the 6 clu
 2. **Dimensions `48..63` (16 Second-Order Cross-Terms and Hyperbolic Tangent Activations):**
    - **6 Pairwise Behavioral Interactions (`Dims 48..53`):** Multiply risk factors in pairs to capture joint spikes:
 
-      $$\text{velocity} \times \text{zscore},\quad \text{velocity} \times \text{geo},\quad \text{velocity} \times \text{degree},\quad \text{zscore} \times \text{geo},\quad \text{zscore} \times \text{degree},\quad \text{geo} \times \text{degree}$$
+      $$
+      \text{velocity} \times \text{zscore},\quad \text{velocity} \times \text{geo},\quad \text{velocity} \times \text{degree},\quad \text{zscore} \times \text{geo},\quad \text{zscore} \times \text{degree},\quad \text{geo} \times \text{degree}
+      $$
 
    - **6 Time-of-Night Cross-Modulations (`Dims 54..59`):** Cross the sine and cosine of the transaction hour with spending velocity, amount Z-score, and geographic travel speed:
 
-      $$\sin(\text{hour})\cdot\text{velocity},\; \cos(\text{hour})\cdot\text{velocity},\; \sin(\text{hour})\cdot\text{zscore},\; \cos(\text{hour})\cdot\text{zscore},\; \sin(\text{hour})\cdot\text{geo},\; \cos(\text{hour})\cdot\text{geo}$$
+      $$
+      \sin(\text{hour})\cdot\text{velocity},\; \cos(\text{hour})\cdot\text{velocity},\; \sin(\text{hour})\cdot\text{zscore},\; \cos(\text{hour})\cdot\text{zscore},\; \sin(\text{hour})\cdot\text{geo},\; \cos(\text{hour})\cdot\text{geo}
+      $$
 
    - **4 Non-Linear Saturating Activations (`Dims 60..63`):** Apply the Hyperbolic Tangent ($\tanh$, a smooth S-shaped curve that squashes any extreme number into `[-1.0, +1.0]`) so a single outlier cannot dominate all 64 dimensions:
 
-      $$\tanh(\text{velocity} + \text{zscore}),\quad \tanh(\text{geo} + \text{degree}),\quad \sin(\text{velocity}\cdot\text{degree}),\quad \cos(\text{zscore}\cdot\text{geo})$$
+      $$
+      \tanh(\text{velocity} + \text{zscore}),\quad \tanh(\text{geo} + \text{degree}),\quad \sin(\text{velocity}\cdot\text{degree}),\quad \cos(\text{zscore}\cdot\text{geo})
+      $$
 
    ![Cross-Terms and the Magic tanh Funnel in Dimensions 48..63](./docs/assets/illustration-math-cross-tanh-en.png)
 
 3. **L2 Unit-Hypersphere Normalization (Every Arrow Has Length `1.0`):**
-   Picture shrinking or stretching every arrow so they all have **the exact same length (`1.0`)**, making only their *direction* matter when comparing. We divide $\mathbf{r}$ by its Euclidean length $\|\mathbf{r}\|_2$:
+   Picture shrinking or stretching every arrow so they all have **the exact same length (`1.0`)**, making only their *direction* matter when comparing. We divide $\mathbf{r}$ by its Euclidean length $\lVert \mathbf{r} \rVert_2$:
 
-   $$\hat{\mathbf{v}} = \frac{\mathbf{r}}{\|\mathbf{r}\|_2} = \frac{\mathbf{r}}{\sqrt{\sum_{i=1}^{64} r_i^2}}, \quad \|\hat{\mathbf{v}}\|_2 = 1.0$$
+   $$
+   \hat{\mathbf{v}} = \frac{\mathbf{r}}{\lVert \mathbf{r} \rVert_2} = \frac{\mathbf{r}}{\sqrt{\sum_{i=1}^{64} r_i^2}}, \quad \lVert \hat{\mathbf{v}} \rVert_2 = 1.0
+   $$
 
    With length `1.0`, the **Cosine Similarity** between an incoming payment $\hat{\mathbf{v}}$ and a stored fraud signature $\hat{\mathbf{s}}$ inside `alloydb_scann` is the cosine of the angle $\theta$ between them:
 
-   $$\text{Cosine Similarity}(\hat{\mathbf{v}}, \hat{\mathbf{s}}) = 1.0 - (\hat{\mathbf{v}} \mathbin{\lt\!=\!\gt} \hat{\mathbf{s}}) = \hat{\mathbf{v}} \cdot \hat{\mathbf{s}} = \cos(\theta) \in [-1.0, 1.0]$$
+   $$
+   \text{Cosine Similarity}(\hat{\mathbf{v}}, \hat{\mathbf{s}}) = 1.0 - d_{\cos}(\hat{\mathbf{v}}, \hat{\mathbf{s}}) = \hat{\mathbf{v}} \cdot \hat{\mathbf{s}} = \cos(\theta) \in [-1.0, 1.0]
+   $$
 
    ![L2 Normalization: Every Arrow on the Unit Circle of Radius 1.0](./docs/assets/illustration-math-l2-normalize-en.png)
 
@@ -208,11 +222,15 @@ Instead of adding unpredictable random noise, `BehavioralVectorProjector.perturb
 1. Draw a random 64-number vector $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{64})$ (64 numbers sampled from a standard normal bell curve with mean `0` and standard deviation `1`).
 2. Subtract its projection onto $\hat{\mathbf{u}}$ and normalize to get a unit arrow $\hat{\mathbf{u}}_{\perp}$ at an exact **90-degree angle** ($\hat{\mathbf{u}} \cdot \hat{\mathbf{u}}_{\perp} = 0$):
 
-   $$\mathbf{p} = \mathbf{z} - (\mathbf{z} \cdot \hat{\mathbf{u}})\hat{\mathbf{u}}, \quad \hat{\mathbf{u}}_{\perp} = \frac{\mathbf{p}}{\|\mathbf{p}\|_2}$$
+   $$
+   \mathbf{p} = \mathbf{z} - (\mathbf{z} \cdot \hat{\mathbf{u}})\hat{\mathbf{u}}, \quad \hat{\mathbf{u}}_{\perp} = \frac{\mathbf{p}}{\lVert \mathbf{p} \rVert_2}
+   $$
 
 3. Blend both arrows using the exact target cosine $\alpha = \cos(\theta)$:
 
-   $$\hat{\mathbf{v}}_{\text{mutated}} = \alpha \cdot \hat{\mathbf{u}} + \sqrt{1 - \alpha^2} \cdot \hat{\mathbf{u}}_{\perp}$$
+   $$
+   \hat{\mathbf{v}}_{\text{mutated}} = \alpha \cdot \hat{\mathbf{u}} + \sqrt{1 - \alpha^2} \cdot \hat{\mathbf{u}}_{\perp}
+   $$
 
    Because $\cos^2\theta + \sin^2\theta = 1$, $\hat{\mathbf{v}}_{\text{mutated}}$ stays length `1.0` with an **exact Cosine Similarity of $\alpha$** (to 6 decimal places) against $\hat{\mathbf{u}}$.
 
@@ -222,7 +240,9 @@ Instead of adding unpredictable random noise, `BehavioralVectorProjector.perturb
 
 Inside Stage 3 (`risk_eval`) of [`sql/queries/hot_path_authorize.sql`](./sql/queries/hot_path_authorize.sql), the database combines the 24-hour Columnar Engine aggregates and the `alloydb_scann` top-10 vector similarity into the final risk score $R \in [0.0, 1.0]$ using a **Piecewise Linear + Non-Linear Circuit-Breaker Equation**:
 
-$$R = \min\left(1.0,\; \max\Big(\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}},\;\; 0.35 \cdot V_{24h} + 0.15 \cdot D_{24h} + 0.50 \cdot S_{\text{vec}}\Big)\right)$$
+$$
+R = \min\left(1.0,\; \max\Big(\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}},\;\; 0.35 \cdot V_{24h} + 0.15 \cdot D_{24h} + 0.50 \cdot S_{\text{vec}}\Big)\right)
+$$
 
 Where each term is defined as:
 - **$V_{24h} = \min\left(1.0,\; \frac{\text{24h spend}}{5,000,000}\right)$ (`sum_24h_cents`, Weight `0.35`):** Reaches its maximum of `1.0` when the sender's 24-hour cumulative spend in that merchant corridor reaches \$50,000 (`5,000,000` cents).
