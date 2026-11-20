@@ -144,15 +144,13 @@ Não usamos números aleatórios sem sentido. Nos arquivos [`src/benchmark/featu
 Antes mesmo de o pagamento chegar ao banco, extraímos **6 sinais matemáticos fundamentais** (representados na notação matemática como $\mathbf{x} \in \mathbb{R}^6$, o que significa uma lista $\mathbf{x}$ contendo 6 números reais com casas decimais) que resumem a física e o comportamento da transferência:
 
 1. **$x_1$ = `velocity_ratio` (Aceleração de Gasto em 24h):** Razão entre a velocidade de gasto atual da conta e o padrão histórico diário daquele cliente (Cliente normal: `0,1 a 1,2`; Ataque de fraude: `2,5 a 6,0`).
-2. **$x_2 = \sin\left(2\pi \cdot \frac{\text{hora}}{24}\right)$ e $x_3 = \cos\left(2\pi \cdot \frac{\text{hora}}{24}\right)$ (Codificação Cíclica do Horário no Círculo Trigonométrico):**
+2. **`x₂ = sin(2π · hora / 24)` e `x₃ = cos(2π · hora / 24)` (Codificação Cíclica do Horário no Círculo Trigonométrico):**
    - *Por que usar Seno e Cosseno para a hora do dia?* Se usássemos apenas o número da hora (`0` a `23`), um PIX feito às `23:59` (hora 23) e outro feito às `00:01` (hora 0) pareceriam estar a **23 horas de distância** para o computador, quando na verdade aconteceram na mesma madrugada, com apenas 2 minutos de diferença. Ao projetar o relógio em um círculo usando $(\sin \theta, \cos \theta)$, garantimos que `23h` e `00h` fiquem lado a lado geometricamente.
 3. **$x_4$ = `amount_zscore` (Escore-Z Estatístico do Valor em Relação ao Ramo de Comércio / "Corredor"):**
    - *O que significa "Corredor" (`corridor`)?* No jargão bancário, um **corredor de pagamento** (representado no nosso banco pela coluna `merchant_category`, de `1` a `50`) é simplesmente o **ramo de atividade ou canal comercial** por onde o dinheiro está passando: por exemplo, no ramo de **Padarias e Cafeterias**, a média normal de um PIX nas últimas 24h ($\mu_{\text{corredor}}$) é **R\$ 25,00**; já no ramo de **Concessionárias de Veículos**, a média normal é **R\$ 45.000,00**. Enviar R\$ 15.000,00 é esperado em uma concessionária, mas é uma anomalia grave em uma padaria.
    - O **Escore-Z** mede quantos desvios-padrão ($\sigma$, a variação típica dos valores ao redor da média) o valor do PIX atual está acima da média normal das últimas 24 horas ($\mu_{\text{corredor}}$) daquele ramo de comércio específico:
 
-   ```math
-   Z = \frac{\text{Valor} - \mu_{\text{corredor}}}{\sigma_{\text{corredor}}}
-   ```
+   ![Fórmula do Escore-Z](./docs/assets/eq-01-zscore-ptbr.png)
 
    (Cliente normal: `-0,8 a +1,1`; Ataque de fraude: `+2,0 a +5,5` desvios-padrão acima do normal daquele ramo).
 
@@ -166,11 +164,9 @@ Antes mesmo de o pagamento chegar ao banco, extraímos **6 sinais matemáticos f
 Pense neste passo como um **equalizador musical**: pegamos 6 notas simples (as 6 pistas acima) e combinamos essas notas em **64 acordes ricos**. Por quê? Porque as quadrilhas se escondem na *combinação* das pistas (como um valor absurdo *às 3h da madrugada* *somado* a uma viagem impossível). Expandindo para 64 números ($\mathbf{v} \in \mathbb{R}^{64}$), inspirados em **Random Fourier Features (RFF)** e **Expansão Polinomial de Segunda Ordem**, uma simples comparação de ângulo (`<=>`) no PostgreSQL consegue "ouvir" essas combinações sem chamar uma rede neural pesada:
 
 1. **Posições `0..47` (48 Harmônicos de Fourier em Múltiplas Frequências):**
-   Para cada uma das 4 frequências harmônicas de onda $f \in \{1, 2, 3, 4\}$, calculamos o seno e o cosseno de todos os 6 sinais escalados por $0.5 \cdot f$:
+   Para cada uma das 4 frequências harmônicas de onda `f ∈ {1, 2, 3, 4}`, calculamos o seno e o cosseno de todos os 6 sinais escalados por `0.5 · f`:
 
-   ```math
-   \mathbf{h}_f = \Big[\sin(0.5 \cdot f \cdot \mathbf{x}),\; \cos(0.5 \cdot f \cdot \mathbf{x})\Big] \in \mathbb{R}^{12} \quad \Longrightarrow \quad 4 \times 12 = 48\text{ dimensões}
-   ```
+   ![Equação dos Harmônicos de Fourier](./docs/assets/eq-02-fourier-ptbr.png)
 
    *Por que isso funciona na matemática:* Pelo Teorema de Bochner, expandir números em ondas de seno e cosseno faz com que o produto escalar simples (Similaridade de Cosseno) aproxime um *Kernel Gaussiano RBF* (uma fronteira curva suave usada em Machine Learning), transformando curvas complexas em ângulos retos fáceis de medir.
 
@@ -179,82 +175,66 @@ Pense neste passo como um **equalizador musical**: pegamos 6 notas simples (as 6
 2. **Posições `48..63` (16 Termos Polinomiais Cruzados e Ativações de Tangente Hiperbólica):**
    - **6 Produtos Cruzados de Segunda Ordem (`Posições 48..53`):** Multiplicam os fatores de risco dois a dois para capturar picos simultâneos:
 
-     ```math
-     \text{velocity} \times \text{zscore},\quad \text{velocity} \times \text{geo},\quad \text{velocity} \times \text{degree},\quad \text{zscore} \times \text{geo},\quad \text{zscore} \times \text{degree},\quad \text{geo} \times \text{degree}
-     ```
+     ![Equação dos 6 Produtos Cruzados](./docs/assets/eq-03a-pairwise.png)
 
    - **6 Modulações de Horário Noturno (`Posições 54..59`):** Cruzam o seno e o cosseno da hora da transação com a velocidade de gasto, o Escore-Z do valor e a velocidade geográfica:
 
-     ```math
-     \sin(\text{hora})\cdot\text{velocity},\; \cos(\text{hora})\cdot\text{velocity},\; \sin(\text{hora})\cdot\text{zscore},\; \cos(\text{hora})\cdot\text{zscore},\; \sin(\text{hora})\cdot\text{geo},\; \cos(\text{hora})\cdot\text{geo}
-     ```
+     ![Equação das 6 Modulações de Horário Noturno](./docs/assets/eq-03b-night-ptbr.png)
 
-   - **4 Ativações Não-Lineares de Saturação (`Posições 60..63`):** Aplicam a Tangente Hiperbólica ($\tanh$, uma curva suave em "S" que comprime qualquer número extremo para a faixa `[-1.0, +1.0]`) para que um único valor gigante não domine todas as 64 dimensões:
+   - **4 Ativações Não-Lineares de Saturação (`Posições 60..63`):** Aplicam a Tangente Hiperbólica (`tanh`, uma curva suave em "S" que comprime qualquer número extremo para a faixa `[-1.0, +1.0]`) para que um único valor gigante não domine todas as 64 dimensões:
 
-     ```math
-     \tanh(\text{velocity} + \text{zscore}),\quad \tanh(\text{geo} + \text{degree}),\quad \sin(\text{velocity}\cdot\text{degree}),\quad \cos(\text{zscore}\cdot\text{geo})
-     ```
+     ![Equação das 4 Ativações Não-Lineares](./docs/assets/eq-03c-activations.png)
 
    ![Cruzamentos de Pistas e o Funil Mágico tanh nas Posições 48..63](./docs/assets/illustration-math-cross-tanh-ptbr.png)
 
 3. **Normalização L2 na Hiperesfera Unitária (Todas as Setas com Tamanho `1.0`):**
-   Imagine encolher ou esticar todas as setas para que tenham **exatamente o mesmo comprimento (`1.0`)**, assim só a *direção* importa na hora de comparar. Dividimos o vetor $\mathbf{r}$ pelo seu comprimento euclidiano $\lVert \mathbf{r} \rVert_2$:
+   Imagine encolher ou esticar todas as setas para que tenham **exatamente o mesmo comprimento (`1.0`)**, assim só a *direção* importa na hora de comparar. Dividimos o vetor **r** pelo seu comprimento euclidiano `||r||₂`:
 
-   ```math
-   \hat{\mathbf{v}} = \frac{\mathbf{r}}{\lVert \mathbf{r} \rVert_2} = \frac{\mathbf{r}}{\sqrt{\sum_{i=1}^{64} r_i^2}}, \quad \lVert \hat{\mathbf{v}} \rVert_2 = 1.0
-   ```
+   ![Equação da Normalização L2](./docs/assets/eq-04-l2-norm.png)
 
-   Com comprimento `1.0`, a **Similaridade de Cosseno** entre o PIX atual $\hat{\mathbf{v}}$ e uma fraude $\hat{\mathbf{s}}$ dentro do `alloydb_scann` é o próprio cosseno do ângulo $\theta$ entre eles:
+   Com comprimento `1.0`, a **Similaridade de Cosseno** entre o PIX atual **v̂** e uma fraude **ŝ** dentro do `alloydb_scann` é o próprio cosseno do ângulo `θ` entre eles:
 
-   ```math
-   \text{Similaridade de Cosseno}(\hat{\mathbf{v}}, \hat{\mathbf{s}}) = 1.0 - d_{\cos}(\hat{\mathbf{v}}, \hat{\mathbf{s}}) = \hat{\mathbf{v}} \cdot \hat{\mathbf{s}} = \cos(\theta) \in [-1.0, 1.0]
-   ```
+   ![Equação da Similaridade de Cosseno](./docs/assets/eq-05-cosine-ptbr.png)
 
    ![Normalização L2: Todas as Setas no Círculo de Raio 1,0](./docs/assets/illustration-math-l2-normalize-ptbr.png)
 
 ### 3.3 Passo Matemático 3: Ortogonalização de Gram-Schmidt para Simular Mutação de Fraudes (`BehavioralVectorProjector.perturb`)
 
-Como testar se o banco pega um golpista que muda levemente o robô dele para ficar exatamente `96%` (`0.96`) ou `78%` (`0.78`) parecido com um golpe antigo $\hat{\mathbf{u}}$? Pense no desenho abaixo como usar um **esquadro de 90° e um transferidor**: primeiro achamos uma seta perpendicular ($\hat{\mathbf{u}}_{\perp}$) e depois misturamos as duas na proporção exata para girar a seta até o ângulo desejado!
+Como testar se o banco pega um golpista que muda levemente o robô dele para ficar exatamente `96%` (`0.96`) ou `78%` (`0.78`) parecido com um golpe antigo **û**? Pense no desenho abaixo como usar um **esquadro de 90° e um transferidor**: primeiro achamos uma seta perpendicular (**û⊥**) e depois misturamos as duas na proporção exata para girar a seta até o ângulo desejado!
 
 ![Ortogonalização de Gram-Schmidt: Como Girar Uma Seta no Ângulo Exato](./docs/assets/illustration-kid-gram-schmidt-ptbr.png)
 
 Em vez de somar ruído aleatório imprevisível, o método `BehavioralVectorProjector.perturb(base_vec, target_cosine_similarity)` aplica a **Ortogonalização de Gram-Schmidt** em 3 passos:
-1. Sorteia um vetor aleatório de 64 números $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{64})$ (64 números sorteados de uma curva normal padrão com média `0` e desvio-padrão `1`).
-2. Subtrai a projeção de $\mathbf{z}$ sobre $\hat{\mathbf{u}}$ e normaliza para obter uma seta unitária $\hat{\mathbf{u}}_{\perp}$ a exatos **90 graus** ($\hat{\mathbf{u}} \cdot \hat{\mathbf{u}}_{\perp} = 0$):
+1. Sorteia um vetor aleatório de 64 números `z ~ N(0, I₆₄)` (64 números sorteados de uma curva normal padrão com média `0` e desvio-padrão `1`).
+2. Subtrai a projeção de `z` sobre **û** e normaliza para obter uma seta unitária **û⊥** a exatos **90 graus** (`û · û⊥ = 0`):
 
-   ```math
-   \mathbf{p} = \mathbf{z} - (\mathbf{z} \cdot \hat{\mathbf{u}})\hat{\mathbf{u}}, \quad \hat{\mathbf{u}}_{\perp} = \frac{\mathbf{p}}{\lVert \mathbf{p} \rVert_2}
-   ```
+   ![Equação da Projeção Ortogonal de Gram-Schmidt](./docs/assets/eq-06-gram-schmidt-perp.png)
 
-3. Mistura as duas setas usando o cosseno alvo exato $\alpha = \cos(\theta)$:
+3. Mistura as duas setas usando o cosseno alvo exato `α = cos(θ)`:
 
-   ```math
-   \hat{\mathbf{v}}_{\text{mutado}} = \alpha \cdot \hat{\mathbf{u}} + \sqrt{1 - \alpha^2} \cdot \hat{\mathbf{u}}_{\perp}
-   ```
+   ![Equação da Mistura de Gram-Schmidt](./docs/assets/eq-07-gram-schmidt-blend-ptbr.png)
 
-   Como $\cos^2\theta + \sin^2\theta = 1$, o vetor $\hat{\mathbf{v}}_{\text{mutado}}$ mantém comprimento `1.0` e tem **Similaridade de Cosseno exata igual a $\alpha$** (com precisão de 6 casas decimais) em relação a $\hat{\mathbf{u}}$.
+   Como `cos²(θ) + sin²(θ) = 1`, o vetor **v̂_mutado** mantém comprimento `1.0` e tem **Similaridade de Cosseno exata igual a `α`** (com precisão de 6 casas decimais) em relação a **û**.
 
 ### 3.4 Passo Matemático 4: A Equação Híbrida de Risco e o Disjuntor Não-Linear (`hot_path_authorize.sql` e `RiskScoringPolicy`)
 
 ![Como o Banco Calcula a Nota de Risco e o Disjuntor de Emergência 0,92](./docs/assets/illustration-math-risk-breaker-ptbr.png)
 
-No Estágio 3 (`risk_eval`) da query [`sql/queries/hot_path_authorize.sql`](./sql/queries/hot_path_authorize.sql), o banco de dados combina as agregações de 24 horas do Motor Colunar com a similaridade das 10 fraudes mais próximas do `alloydb_scann` na nota final de risco $R \in [0.0, 1.0]$ usando uma **Equação Linear por Partes com Disjuntor Não-Linear**:
+No Estágio 3 (`risk_eval`) da query [`sql/queries/hot_path_authorize.sql`](./sql/queries/hot_path_authorize.sql), o banco de dados combina as agregações de 24 horas do Motor Colunar com a similaridade das 10 fraudes mais próximas do `alloydb_scann` na nota final de risco `R ∈ [0.0, 1.0]` usando uma **Equação Linear por Partes com Disjuntor Não-Linear**:
 
-```math
-R = \min\left(1.0,\; \max\Big(\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}},\;\; 0.35 \cdot V_{24h} + 0.15 \cdot D_{24h} + 0.50 \cdot S_{\text{vec}}\Big)\right)
-```
+![Equação Híbrida de Risco e Disjuntor Não-Linear](./docs/assets/eq-08-risk-score.png)
 
 Onde cada termo é definido por:
-- **$V_{24h} = \min\left(1.0,\; \frac{\text{gasto}_{24h}}{5.000.000}\right)$ (`sum_24h_cents`, Peso `0,35`):** Atinge o teto `1.0` quando o acumulado enviado pela conta nas últimas 24 horas naquele corredor comercial chega a R\$ 50.000 (`5.000.000` centavos).
-- **$D_{24h} = \min\left(1.0,\; \frac{\text{aparelhos}_{24h}}{5.0}\right)$ (`distinct_devices_24h`, Peso `0,15`):** Atinge o teto `1.0` quando 5 ou mais aparelhos distintos operam a conta em 24 horas.
-- **$S_{\text{vec}} = \max_{k \in 1..10} \Big(1.0 - d_{\cos}(\mathbf{v}_{\text{tx}},\; \mathbf{v}_{\text{sig},k})\Big)$ (`1.0 - (behavioral_vec <=> sig_k)`, Peso `0,50`):** A maior similaridade de cosseno encontrada entre as 10 assinaturas de fraude pré-filtradas pelo `alloydb_scann`.
-- **$\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}}$ (O Disjuntor de Autoimunização):**
-  Aqui o símbolo $\mathbb{I}(\text{condição})$ é uma **função indicadora** (uma chave liga/desliga matemática que vale `1` quando a condição dentro dos parênteses é verdadeira e `0` quando é falsa). Veja por que essa chave é essencial: imagine uma conta "laranja" recém-aberta que gastou R\$ 0 nas últimas 24 horas ($V_{24h} = 0$) e usou apenas 1 aparelho ($D_{24h} = 0.2$). Sem o disjuntor, mesmo que o vetor do PIX batesse com uma fraude confirmada em $S_{\text{vec}} = 0.95$, a soma ponderada sozinha daria $0.35(0) + 0.15(0.2) + 0.50(0.95) = 0.505$, aprovando a fraude por engano. Com a sobreposição $\max(\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}}, \dots)$, qualquer semelhança vetorial $\ge 0.92$ ignora os pesos baixos do histórico e eleva a nota diretamente para $R = 0.95 \ge 0.85$ (`BLOCKED`).
+- **`V_24h = min(1.0, sum_24h_cents / 5.000.000)` (Peso `0,35`):** Atinge o teto `1.0` quando o acumulado enviado pela conta nas últimas 24 horas naquele corredor comercial chega a R\$ 50.000 (`5.000.000` centavos).
+- **`D_24h = min(1.0, distinct_devices_24h / 5.0)` (Peso `0,15`):** Atinge o teto `1.0` quando 5 ou mais aparelhos distintos operam a conta em 24 horas.
+- **`S_vec = max_{k=1..10}(1.0 - (behavioral_vec <=> sig_k))` (Peso `0,50`):** A maior similaridade de cosseno encontrada entre as 10 assinaturas de fraude pré-filtradas pelo `alloydb_scann`.
+- **`I(S_vec >= 0.92) · S_vec` (O Disjuntor de Autoimunização):**
+  Aqui o símbolo `I(condição)` é uma **função indicadora** (uma chave liga/desliga matemática que vale `1` quando a condição dentro dos parênteses é verdadeira e `0` quando é falsa). Veja por que essa chave é essencial: imagine uma conta "laranja" recém-aberta que gastou R\$ 0 nas últimas 24 horas (`V_24h = 0`) e usou apenas 1 aparelho (`D_24h = 0.2`). Sem o disjuntor, mesmo que o vetor do PIX batesse com uma fraude confirmada em `S_vec = 0.95`, a soma ponderada sozinha daria `0.35(0) + 0.15(0.2) + 0.50(0.95) = 0.505`, aprovando a fraude por engano. Com a sobreposição `max(I(S_vec >= 0.92) · S_vec, ...)`, qualquer semelhança vetorial `>= 0.92` ignora os pesos baixos do histórico e eleva a nota diretamente para `R = 0.95 >= 0.85` (`BLOCKED`).
 
 **Limites de Decisão (`inserted_tx` CTE):**
-- **$R < 0.60 \implies$ `'APPROVED'`** (Tráfego legítimo aprovado em `~5,1 ms` por consulta isolada).
-- **$0.60 \le R < 0.85 \implies$ `'FLAGGED_GREY_ZONE'`** (Enfileirado na `agent_triage_outbox` para o **Gemini 4 Hydrogen**).
-- **$R \ge 0.85 \implies$ `'BLOCKED'`** (Fraude conhecida ou imunizada bloqueada em `~5,1 ms` por consulta isolada).
+- **`R < 0.60` → `'APPROVED'`** (Tráfego legítimo aprovado em `~5,1 ms` por consulta isolada).
+- **`0.60 <= R < 0.85` → `'FLAGGED_GREY_ZONE'`** (Enfileirado na `agent_triage_outbox` para o **Gemini 4 Hydrogen**).
+- **`R >= 0.85` → `'BLOCKED'`** (Fraude conhecida ou imunizada bloqueada em `~5,1 ms` por consulta isolada).
 
 > **Afiando o Lápis (Desafio Relâmpago de 15 Segundos!)**
 >

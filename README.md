@@ -144,15 +144,13 @@ We do not use random dummy numbers. In [`src/benchmark/feature_generator.py`](./
 Before a payment touches the database, we extract **6 core mathematical signals** (written in mathematical notation as $\mathbf{x} \in \mathbb{R}^6$, meaning a list $\mathbf{x}$ of 6 real decimal numbers) that summarize the physics and behavior of the transfer:
 
 1. **$x_1$ = `velocity_ratio` (24h Spending Acceleration):** How fast the account is spending today divided by its normal daily average (Normal customer: `0.1 to 1.2`; Fraudulent attack: `2.5 to 6.0`).
-2. **$x_2 = \sin\left(2\pi \cdot \frac{\text{hour}}{24}\right)$ and $x_3 = \cos\left(2\pi \cdot \frac{\text{hour}}{24}\right)$ (Cyclical Time-of-Day Encoding):**
+2. **`x₂ = sin(2π · hour / 24)` and `x₃ = cos(2π · hour / 24)` (Cyclical Time-of-Day Encoding):**
    - *Why use Sine and Cosine for hours?* In plain numbers, `23:59` (hour 23) and `00:01` (hour 0) look 23 hours apart, even though they are only 2 minutes apart in the middle of the night. Mapping the 24-hour clock onto a unit circle using $(\sin \theta, \cos \theta)$ guarantees that late-night scam hours sit right next to each other geometrically.
 3. **$x_4$ = `amount_zscore` (Statistical Z-Score of the Transfer Amount vs. the Business Category / "Corridor"):**
    - *What is a "Payment Corridor"?* In banking, a **corridor** (`merchant_category`, numbered `1..50` in our database) simply means the specific **type of business or payment channel**: for example, a bakery or coffee shop (where the 24-hour average transfer $\mu_{\text{corridor}}$ is \$15) versus a car dealership (where the 24-hour average is \$25,000). Sending \$8,000 at a car dealership is normal, but sending \$8,000 at a bakery is a major anomaly.
    - The **Z-Score** measures how many standard deviations ($\sigma$, the typical spread of values around the average) the current payment amount is above the normal 24-hour average ($\mu_{\text{corridor}}$) of that specific business category:
 
-   ```math
-   Z = \frac{\text{Amount} - \mu_{\text{corridor}}}{\sigma_{\text{corridor}}}
-   ```
+   ![Z-Score Formula](./docs/assets/eq-01-zscore-en.png)
 
    (Normal customer: `-0.8 to +1.1`; Fraudulent attack: `+2.0 to +5.5` standard deviations above that category's norm).
 
@@ -166,11 +164,9 @@ Before a payment touches the database, we extract **6 core mathematical signals*
 Think of this step like a **music equalizer**: we take 6 simple notes (the 6 clues above) and blend them into **64 rich chords**. Why? Because fraud rings hide in the *combination* of signals (like a huge amount *at 3:00 AM* *plus* impossible travel). Expanding into 64 numbers ($\mathbf{v} \in \mathbb{R}^{64}$), inspired by **Random Fourier Features (RFF)** and **Second-Order Polynomial Kernel Expansion**, lets a single **Cosine Distance (`<=>`)** inside PostgreSQL "hear" those curved combinations without calling a heavy neural network:
 
 1. **Dimensions `0..47` (48 Multi-Frequency Fourier Harmonics):**
-   For each of the 4 harmonic wave frequencies $f \in \{1, 2, 3, 4\}$, we compute both the sine and cosine of all 6 core signals scaled by $0.5 \cdot f$:
+   For each of the 4 harmonic wave frequencies `f ∈ {1, 2, 3, 4}`, we compute both the sine and cosine of all 6 core signals scaled by `0.5 · f`:
 
-   ```math
-   \mathbf{h}_f = \Big[\sin(0.5 \cdot f \cdot \mathbf{x}),\; \cos(0.5 \cdot f \cdot \mathbf{x})\Big] \in \mathbb{R}^{12} \quad \Longrightarrow \quad 4 \times 12 = 48\text{ dimensions}
-   ```
+   ![Fourier Harmonics Equation](./docs/assets/eq-02-fourier-en.png)
 
    *Why this works mathematically:* By Bochner's theorem, expanding raw numbers into sine and cosine waves lets a simple dot product (Cosine Similarity) approximate a *Gaussian RBF kernel* (a smooth curved decision boundary from machine learning), turning curved boundaries into flat geometric angles.
 
@@ -179,82 +175,66 @@ Think of this step like a **music equalizer**: we take 6 simple notes (the 6 clu
 2. **Dimensions `48..63` (16 Second-Order Cross-Terms and Hyperbolic Tangent Activations):**
    - **6 Pairwise Behavioral Interactions (`Dims 48..53`):** Multiply risk factors in pairs to capture joint spikes:
 
-     ```math
-     \text{velocity} \times \text{zscore},\quad \text{velocity} \times \text{geo},\quad \text{velocity} \times \text{degree},\quad \text{zscore} \times \text{geo},\quad \text{zscore} \times \text{degree},\quad \text{geo} \times \text{degree}
-     ```
+     ![Pairwise Behavioral Interactions Equation](./docs/assets/eq-03a-pairwise.png)
 
    - **6 Time-of-Night Cross-Modulations (`Dims 54..59`):** Cross the sine and cosine of the transaction hour with spending velocity, amount Z-score, and geographic travel speed:
 
-     ```math
-     \sin(\text{hour})\cdot\text{velocity},\; \cos(\text{hour})\cdot\text{velocity},\; \sin(\text{hour})\cdot\text{zscore},\; \cos(\text{hour})\cdot\text{zscore},\; \sin(\text{hour})\cdot\text{geo},\; \cos(\text{hour})\cdot\text{geo}
-     ```
+     ![Time-of-Night Cross-Modulations Equation](./docs/assets/eq-03b-night-en.png)
 
-   - **4 Non-Linear Saturating Activations (`Dims 60..63`):** Apply the Hyperbolic Tangent ($\tanh$, a smooth S-shaped curve that squashes any extreme number into `[-1.0, +1.0]`) so a single outlier cannot dominate all 64 dimensions:
+   - **4 Non-Linear Saturating Activations (`Dims 60..63`):** Apply the Hyperbolic Tangent (`tanh`, a smooth S-shaped curve that squashes any extreme number into `[-1.0, +1.0]`) so a single outlier cannot dominate all 64 dimensions:
 
-     ```math
-     \tanh(\text{velocity} + \text{zscore}),\quad \tanh(\text{geo} + \text{degree}),\quad \sin(\text{velocity}\cdot\text{degree}),\quad \cos(\text{zscore}\cdot\text{geo})
-     ```
+     ![Non-Linear Saturating Activations Equation](./docs/assets/eq-03c-activations.png)
 
    ![Cross-Terms and the Magic tanh Funnel in Dimensions 48..63](./docs/assets/illustration-math-cross-tanh-en.png)
 
 3. **L2 Unit-Hypersphere Normalization (Every Arrow Has Length `1.0`):**
-   Picture shrinking or stretching every arrow so they all have **the exact same length (`1.0`)**, making only their *direction* matter when comparing. We divide $\mathbf{r}$ by its Euclidean length $\lVert \mathbf{r} \rVert_2$:
+   Picture shrinking or stretching every arrow so they all have **the exact same length (`1.0`)**, making only their *direction* matter when comparing. We divide **r** by its Euclidean length `||r||₂`:
 
-   ```math
-   \hat{\mathbf{v}} = \frac{\mathbf{r}}{\lVert \mathbf{r} \rVert_2} = \frac{\mathbf{r}}{\sqrt{\sum_{i=1}^{64} r_i^2}}, \quad \lVert \hat{\mathbf{v}} \rVert_2 = 1.0
-   ```
+   ![L2 Normalization Equation](./docs/assets/eq-04-l2-norm.png)
 
-   With length `1.0`, the **Cosine Similarity** between an incoming payment $\hat{\mathbf{v}}$ and a stored fraud signature $\hat{\mathbf{s}}$ inside `alloydb_scann` is the cosine of the angle $\theta$ between them:
+   With length `1.0`, the **Cosine Similarity** between an incoming payment **v̂** and a stored fraud signature **ŝ** inside `alloydb_scann` is the cosine of the angle `θ` between them:
 
-   ```math
-   \text{Cosine Similarity}(\hat{\mathbf{v}}, \hat{\mathbf{s}}) = 1.0 - d_{\cos}(\hat{\mathbf{v}}, \hat{\mathbf{s}}) = \hat{\mathbf{v}} \cdot \hat{\mathbf{s}} = \cos(\theta) \in [-1.0, 1.0]
-   ```
+   ![Cosine Similarity Equation](./docs/assets/eq-05-cosine-en.png)
 
    ![L2 Normalization: Every Arrow on the Unit Circle of Radius 1.0](./docs/assets/illustration-math-l2-normalize-en.png)
 
 ### 3.3 Mathematical Step 3: Gram-Schmidt Orthogonal Perturbation (`BehavioralVectorProjector.perturb`)
 
-How do we test whether the database catches a fraudster who tweaks their bot to be exactly `96%` (`0.96`) or `78%` (`0.78`) similar to a known scam $\hat{\mathbf{u}}$? Think of the drawing below as using a **90° L-ruler and a protractor**: first we find a perpendicular arrow ($\hat{\mathbf{u}}_{\perp}$), then we blend both arrows in the exact ratio to tilt to the target angle!
+How do we test whether the database catches a fraudster who tweaks their bot to be exactly `96%` (`0.96`) or `78%` (`0.78`) similar to a known scam **û**? Think of the drawing below as using a **90° L-ruler and a protractor**: first we find a perpendicular arrow (**û⊥**), then we blend both arrows in the exact ratio to tilt to the target angle!
 
 ![Gram-Schmidt Orthogonalization: Tilting an Arrow by an Exact Angle](./docs/assets/illustration-kid-gram-schmidt-en.png)
 
 Instead of adding unpredictable random noise, `BehavioralVectorProjector.perturb(base_vec, target_cosine_similarity)` applies **Gram-Schmidt Orthogonalization** in 3 steps:
-1. Draw a random 64-number vector $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_{64})$ (64 numbers sampled from a standard normal bell curve with mean `0` and standard deviation `1`).
-2. Subtract its projection onto $\hat{\mathbf{u}}$ and normalize to get a unit arrow $\hat{\mathbf{u}}_{\perp}$ at an exact **90-degree angle** ($\hat{\mathbf{u}} \cdot \hat{\mathbf{u}}_{\perp} = 0$):
+1. Draw a random 64-number vector `z ~ N(0, I₆₄)` (64 numbers sampled from a standard normal bell curve with mean `0` and standard deviation `1`).
+2. Subtract its projection onto **û** and normalize to get a unit arrow **û⊥** at an exact **90-degree angle** (`û · û⊥ = 0`):
 
-   ```math
-   \mathbf{p} = \mathbf{z} - (\mathbf{z} \cdot \hat{\mathbf{u}})\hat{\mathbf{u}}, \quad \hat{\mathbf{u}}_{\perp} = \frac{\mathbf{p}}{\lVert \mathbf{p} \rVert_2}
-   ```
+   ![Gram-Schmidt Orthogonal Projection Equation](./docs/assets/eq-06-gram-schmidt-perp.png)
 
-3. Blend both arrows using the exact target cosine $\alpha = \cos(\theta)$:
+3. Blend both arrows using the exact target cosine `α = cos(θ)`:
 
-   ```math
-   \hat{\mathbf{v}}_{\text{mutated}} = \alpha \cdot \hat{\mathbf{u}} + \sqrt{1 - \alpha^2} \cdot \hat{\mathbf{u}}_{\perp}
-   ```
+   ![Gram-Schmidt Blending Equation](./docs/assets/eq-07-gram-schmidt-blend-en.png)
 
-   Because $\cos^2\theta + \sin^2\theta = 1$, $\hat{\mathbf{v}}_{\text{mutated}}$ stays length `1.0` with an **exact Cosine Similarity of $\alpha$** (to 6 decimal places) against $\hat{\mathbf{u}}$.
+   Because `cos²(θ) + sin²(θ) = 1`, **v̂_mutated** stays length `1.0` with an **exact Cosine Similarity of `α`** (to 6 decimal places) against **û**.
 
 ### 3.4 Mathematical Step 4: The Piecewise Hybrid Risk Scoring Equation (`hot_path_authorize.sql` and `RiskScoringPolicy`)
 
 ![How the Database Scores Risk and Fires the 0.92 Emergency Circuit Breaker](./docs/assets/illustration-math-risk-breaker-en.png)
 
-Inside Stage 3 (`risk_eval`) of [`sql/queries/hot_path_authorize.sql`](./sql/queries/hot_path_authorize.sql), the database combines the 24-hour Columnar Engine aggregates and the `alloydb_scann` top-10 vector similarity into the final risk score $R \in [0.0, 1.0]$ using a **Piecewise Linear + Non-Linear Circuit-Breaker Equation**:
+Inside Stage 3 (`risk_eval`) of [`sql/queries/hot_path_authorize.sql`](./sql/queries/hot_path_authorize.sql), the database combines the 24-hour Columnar Engine aggregates and the `alloydb_scann` top-10 vector similarity into the final risk score `R ∈ [0.0, 1.0]` using a **Piecewise Linear + Non-Linear Circuit-Breaker Equation**:
 
-```math
-R = \min\left(1.0,\; \max\Big(\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}},\;\; 0.35 \cdot V_{24h} + 0.15 \cdot D_{24h} + 0.50 \cdot S_{\text{vec}}\Big)\right)
-```
+![Piecewise Hybrid Risk Scoring Equation](./docs/assets/eq-08-risk-score.png)
 
 Where each term is defined as:
-- **$V_{24h} = \min\left(1.0,\; \frac{\text{24h spend}}{5,000,000}\right)$ (`sum_24h_cents`, Weight `0.35`):** Reaches its maximum of `1.0` when the sender's 24-hour cumulative spend in that merchant corridor reaches \$50,000 (`5,000,000` cents).
-- **$D_{24h} = \min\left(1.0,\; \frac{\text{devices}_{24h}}{5.0}\right)$ (`distinct_devices_24h`, Weight `0.15`):** Reaches its maximum of `1.0` when 5 or more distinct hardware device fingerprints touch the account within 24 hours.
-- **$S_{\text{vec}} = \max_{k \in 1..10} \Big(1.0 - d_{\cos}(\mathbf{v}_{\text{tx}},\; \mathbf{v}_{\text{sig},k})\Big)$ (`1.0 - (behavioral_vec <=> sig_k)`, Weight `0.50`):** The highest cosine similarity among the top-10 pre-filtered fraud signatures returned by `alloydb_scann`.
-- **$\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}}$ (The Self-Immunizing Circuit Breaker):**
-  Here $\mathbb{I}(\text{condition})$ is an **indicator function** (a simple on/off switch that equals `1` if the condition inside the parentheses is true, and `0` if it is false). Notice why this switch is essential: suppose a brand-new mule account has \$0 spent in the last 24 hours ($V_{24h} = 0$) and only 1 device ($D_{24h} = 0.2$). Without the circuit breaker, even if its vector matched a confirmed fraud signature at $S_{\text{vec}} = 0.95$, the weighted sum alone would be $0.35(0) + 0.15(0.2) + 0.50(0.95) = 0.505$, which would mistakenly approve the fraud. Because of the $\max(\mathbb{I}(S_{\text{vec}} \ge 0.92) \cdot S_{\text{vec}}, \dots)$ override, any vector match $\ge 0.92$ bypasses the low velocity weights and jumps straight to $R = 0.95 \ge 0.85$ (`BLOCKED`).
+- **`V_24h = min(1.0, sum_24h_cents / 5,000,000)` (Weight `0.35`):** Reaches its maximum of `1.0` when the sender's 24-hour cumulative spend in that merchant corridor reaches \$50,000 (`5,000,000` cents).
+- **`D_24h = min(1.0, distinct_devices_24h / 5.0)` (Weight `0.15`):** Reaches its maximum of `1.0` when 5 or more distinct hardware device fingerprints touch the account within 24 hours.
+- **`S_vec = max_{k=1..10}(1.0 - (behavioral_vec <=> sig_k))` (Weight `0.50`):** The highest cosine similarity among the top-10 pre-filtered fraud signatures returned by `alloydb_scann`.
+- **`I(S_vec >= 0.92) · S_vec` (The Self-Immunizing Circuit Breaker):**
+  Here `I(condition)` is an **indicator function** (a simple on/off switch that equals `1` if the condition inside the parentheses is true, and `0` if it is false). Notice why this switch is essential: suppose a brand-new mule account has \$0 spent in the last 24 hours (`V_24h = 0`) and only 1 device (`D_24h = 0.2`). Without the circuit breaker, even if its vector matched a confirmed fraud signature at `S_vec = 0.95`, the weighted sum alone would be `0.35(0) + 0.15(0.2) + 0.50(0.95) = 0.505`, which would mistakenly approve the fraud. Because of the `max(I(S_vec >= 0.92) · S_vec, ...)` override, any vector match `>= 0.92` bypasses the low velocity weights and jumps straight to `R = 0.95 >= 0.85` (`BLOCKED`).
 
 **Decision Thresholds (`inserted_tx` CTE):**
-- **$R < 0.60 \implies$ `'APPROVED'`** (Clean traffic passes in `~5.1 ms` per isolated query).
-- **$0.60 \le R < 0.85 \implies$ `'FLAGGED_GREY_ZONE'`** (Enqueued into `agent_triage_outbox` for **Gemini 4 Hydrogen**).
-- **$R \ge 0.85 \implies$ `'BLOCKED'`** (Known or immunized fraud blocked in `~5.1 ms` per isolated query).
+- **`R < 0.60` → `'APPROVED'`** (Clean traffic passes in `~5.1 ms` per isolated query).
+- **`0.60 <= R < 0.85` → `'FLAGGED_GREY_ZONE'`** (Enqueued into `agent_triage_outbox` for **Gemini 4 Hydrogen**).
+- **`R >= 0.85` → `'BLOCKED'`** (Known or immunized fraud blocked in `~5.1 ms` per isolated query).
 
 > **Sharpen Your Pencil (15-Second Lightning Challenge!)**
 >
