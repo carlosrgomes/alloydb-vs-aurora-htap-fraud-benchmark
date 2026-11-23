@@ -260,7 +260,7 @@ No arquivo [`src/agent/triage_worker.py`](./src/agent/triage_worker.py), a avali
 
 #### Fase 1 (Transação de `< 2 ms` no Banco): Reserva Sem Travas (`FOR UPDATE SKIP LOCKED`)
 
-O método `OutboxRepository.claim_pending_batch` busca até 5 registros `PENDING` na tabela `agent_triage_outbox`, altera o status para `'PROCESSING'` e **executa `commit` na transação imediatamente**. Como a transação no banco é encerrada antes da chamada ao modelo de IA, **nenhuma linha fica bloqueada** durante os **`~3,5 segundos` (`3.543,6 ms`)** da inferência do Gemini (e, se um worker falhar, `reclaim_stale_leases` devolve registros presos há mais de 30 segundos para `'PENDING'`).
+O método `OutboxRepository.claim_pending_batch` busca até 5 registros `PENDING` na tabela `agent_triage_outbox`, altera o status para `'PROCESSING'`, grava um *fencing token* único por reserva (`lease_token = gen_random_uuid()`) e **executa `commit` na transação imediatamente**. Como a transação no banco é encerrada antes da chamada ao modelo de IA, **nenhuma linha fica bloqueada** durante os **`~3,5 segundos` (`3.543,6 ms`)** da inferência do Gemini (e, se um worker falhar, `reclaim_stale_leases` devolve registros presos há mais de 30 segundos para `'PENDING'` e limpa `lease_token = NULL`).
 
 #### Fase 2 (Inferência Vertex AI Sem Estado — Medido ao Vivo em `~3,5 s`): O Prompt Forense e o Raciocínio em JSON Estruturado
 
@@ -313,7 +313,7 @@ Na nossa chamada real ao vivo no Vertex AI (`3.543,6 ms`), o **Gemini 4 Hydrogen
 
 #### Fase 3 (Transação de `< 5 ms` no Banco): Deduplicação Vetorial e Autoimunização
 
-Quando `verdict == 'CONFIRMED_FRAUD'` e `confidence_score >= 0.85`, o método `OutboxRepository.complete_triage_and_immunize` marca o item da fila como `'COMPLETED'` e insere o vetor de 64 dimensões (`behavioral_vec`) na tabela `fraud_signatures` (`source = 'GEMINI_AGENT_IMMUNIZED'`) com uma **proteção automática de deduplicação por cosseno (`>= 0,98`)**:
+O método `OutboxRepository.complete_triage_and_immunize` marca o item da fila como `'COMPLETED'` com um **`UPDATE` protegido por *fencing*** (`WHERE outbox_id = $1 AND status = 'PROCESSING' AND lease_token = $2::UUID`) — se `cur.rowcount == 0`, o *lease* expirou e foi retomado por outro worker, fazendo o worker "zumbi" abortar imediatamente sem sobrescrever o outbox nem gravar em `fraud_signatures`. Com o *lease* válido, quando `verdict == 'CONFIRMED_FRAUD'` e `confidence_score >= 0.85`, ele insere o vetor de 64 dimensões (`behavioral_vec`) na tabela `fraud_signatures` (`source = 'GEMINI_AGENT_IMMUNIZED'`) com uma **proteção automática de deduplicação por cosseno (`>= 0,98`)**:
 
 ```sql
 INSERT INTO fraud_signatures (
@@ -571,7 +571,7 @@ O Diagrama de Entidade-Relacionamento (ER) abaixo mostra as três tabelas do ban
 1. **[`sql/01_schema.sql`](./sql/01_schema.sql): As Três Tabelas Principais**
    - **`payment_ledger`:** Armazena cada transferência (`tx_id UUID PRIMARY KEY`, `sender_account_id`, `receiver_account_id`, `device_fingerprint`, `merchant_category`, `selectivity_bucket`, `amount_cents`, `tx_timestamp`, `behavioral_vec vector(64)`, `composite_risk_score` e `decision`).
    - **`fraud_signatures`:** Guarda os padrões vetoriais de 64 dimensões de fraudes confirmadas (`signature_id UUID PRIMARY KEY`, `merchant_category`, `selectivity_bucket`, `created_at`, `source` em `'SEED_CORPUS' | 'CHURN_STREAM' | 'GEMINI_AGENT_IMMUNIZED'`, `behavioral_vec vector(64)` e `pattern_description`).
-   - **`agent_triage_outbox`:** Guarda as transações suspeitas da zona cinzenta (`outbox_id BIGSERIAL PRIMARY KEY`, `tx_id` com `ON DELETE CASCADE`, `status` em `'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'`, `payload JSONB`, `agent_verdict`, `agent_rationale`, `created_at` e `processed_at`), contando com um índice parcial `idx_outbox_pending_poll` (`WHERE status IN ('PENDING', 'PROCESSING')`) para encontrar casos pendentes e recuperar reservas expiradas em menos de 1 milissegundo.
+   - **`agent_triage_outbox`:** Guarda as transações suspeitas da zona cinzenta (`outbox_id BIGSERIAL PRIMARY KEY`, `tx_id` com `ON DELETE CASCADE`, `status` em `'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'`, `lease_token UUID` para *fencing* de workers zumbis, `payload JSONB`, `agent_verdict`, `agent_rationale`, `created_at` e `processed_at`), contando com um índice parcial `idx_outbox_pending_poll` (`WHERE status IN ('PENDING', 'PROCESSING')`) para encontrar casos pendentes e recuperar reservas expiradas em menos de 1 milissegundo.
 
 2. **[`sql/02_setup_alloydb.sql`](./sql/02_setup_alloydb.sql): Configuração do Motor Colunar e do `alloydb_scann`**
    - Carrega as extensões `alloydb_scann`, `google_columnar_engine` e `google_ml_integration`.
@@ -615,9 +615,9 @@ O Diagrama de Entidade-Relacionamento (ER) abaixo mostra as três tabelas do ban
      - **`GenAISDKStrategy`:** Invoca o **Gemini 4 Hydrogen** (`gemini-4-hydrogen`) pelo SDK Python `google-genai` com `response_mime_type="application/json"` e valida o retorno pelo modelo `AgentAssessment`.
      - **`DeterministicLocalStrategy`:** Avalia os casos localmente sem precisar de credenciais de nuvem para testes offline e integração contínua (e atua automaticamente como fallback seguro caso a chamada remota falhe).
    - **`AgentTriageWorker.process_once`:** Executa o ciclo em três fases:
-     1. **Fase 1 (Reserva Rápida):** Recupera reservas antigas acima de 30 segundos, reserva um lote de linhas `PENDING` com `FOR UPDATE SKIP LOCKED`, muda o status para `'PROCESSING'` e faz commit imediatamente (`< 2 ms`) para não segurar nenhuma trava no banco durante a chamada à IA.
+     1. **Fase 1 (Reserva Rápida):** Recupera reservas antigas acima de 30 segundos (limpando `lease_token`), reserva um lote de linhas `PENDING` com `FOR UPDATE SKIP LOCKED`, muda o status para `'PROCESSING'` com `lease_token = gen_random_uuid()` e faz commit imediatamente (`< 2 ms`) para não segurar nenhuma trava no banco durante a chamada à IA.
      2. **Fase 2 (Inferência na IA):** Executa `FraudInferenceStrategy.evaluate` totalmente fora de transações do banco (`~3,5 s` medidos ao vivo no Vertex AI `gemini-4-hydrogen`).
-     3. **Fase 3 (Autoimunização):** Chama `complete_triage_and_immunize` para marcar o item da fila como `'COMPLETED'` e, quando `verdict == 'CONFIRMED_FRAUD'` com `confidence_score >= 0.85`, insere o vetor de 64 dimensões na tabela `fraud_signatures` (`source = 'GEMINI_AGENT_IMMUNIZED'`) com a checagem de deduplicação por cosseno `>= 0.98`.
+     3. **Fase 3 (Autoimunização):** Chama `complete_triage_and_immunize` para executar o `UPDATE` com *fencing* (`AND status = 'PROCESSING' AND lease_token = $2::UUID`) marcando o item da fila como `'COMPLETED'` (abortando se `rowcount == 0` contra sobrescritas de workers zumbis) e, quando `verdict == 'CONFIRMED_FRAUD'` com `confidence_score >= 0.85`, insere o vetor de 64 dimensões na tabela `fraud_signatures` (`source = 'GEMINI_AGENT_IMMUNIZED'`) com a checagem de deduplicação por cosseno `>= 0.98`.
 
 5. **[`src/benchmark/reporter.py`](./src/benchmark/reporter.py): Agregador de Telemetria e Exportador Markdown/CSV**
    - **`CsvTelemetryExporter` e `MarkdownReportFormatter`:** Leem os arquivos JSON de telemetria (`--inputs`) e geram [`results/benchmark_summary.md`](./results/benchmark_summary.md) e [`results/raw_telemetry.csv`](./results/raw_telemetry.csv).
