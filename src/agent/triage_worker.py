@@ -25,6 +25,7 @@ class OutboxItem(BaseModel):
     outbox_id: int
     tx_id: UUID
     payload: dict[str, Any]
+    lease_token: UUID | None = None
 
 
 class AgentAssessment(BaseModel):
@@ -180,7 +181,7 @@ class OutboxRepository:
                 cur.execute(
                     """
                     UPDATE agent_triage_outbox
-                    SET status = 'PENDING', processed_at = NULL
+                    SET status = 'PENDING', lease_token = NULL, processed_at = NULL
                     WHERE status = 'PROCESSING'
                       AND processed_at < clock_timestamp() - (%s || ' seconds')::INTERVAL;
                     """,
@@ -189,14 +190,16 @@ class OutboxRepository:
                 return int(cur.rowcount or 0)
 
     def claim_pending_batch(self, batch_size: int = 5) -> list[OutboxItem]:
-        """Phase 1 (<2ms TX): Atomically claims up to `batch_size` rows and commits immediately."""
+        """Phase 1 (<2ms TX): Atomically claims up to `batch_size` rows with a fencing lease token."""
         items: list[OutboxItem] = []
         with psycopg.connect(self.dsn, autocommit=False) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     UPDATE agent_triage_outbox
-                    SET status = 'PROCESSING', processed_at = clock_timestamp()
+                    SET status = 'PROCESSING',
+                        lease_token = gen_random_uuid(),
+                        processed_at = clock_timestamp()
                     WHERE outbox_id IN (
                         SELECT outbox_id
                         FROM agent_triage_outbox
@@ -205,19 +208,22 @@ class OutboxRepository:
                         LIMIT %s
                         FOR UPDATE SKIP LOCKED
                     )
-                    RETURNING outbox_id, tx_id, payload;
+                    RETURNING outbox_id, tx_id, lease_token, payload;
                     """,
                     (batch_size,),
                 )
                 rows = cur.fetchall()
             conn.commit()
 
-        for outbox_id, tx_id, payload in rows:
+        for outbox_id, tx_id, lease_token, payload in rows:
             parsed_payload = payload if isinstance(payload, dict) else json.loads(str(payload))
             items.append(
                 OutboxItem(
                     outbox_id=int(outbox_id),
                     tx_id=tx_id if isinstance(tx_id, UUID) else UUID(str(tx_id)),
+                    lease_token=(
+                        lease_token if isinstance(lease_token, UUID) else UUID(str(lease_token))
+                    ),
                     payload=parsed_payload,
                 )
             )
@@ -228,7 +234,14 @@ class OutboxRepository:
         item: OutboxItem,
         assessment: AgentAssessment,
     ) -> UUID | None:
-        """Phase 3 (<5ms TX): Marks outbox item COMPLETED and writes confirmed fraud vector back."""
+        """Phase 3 (<5ms TX): Fenced outbox completion and confirmed fraud vector write-back.
+
+        Enforces `lease_token` fencing so a stale worker whose lease expired and was reclaimed
+        by another worker cannot overwrite `agent_triage_outbox` or write to `fraud_signatures`.
+        """
+        if item.lease_token is None:
+            raise ValueError("Cannot complete outbox item without an active lease_token.")
+
         inserted_sig_id: UUID | None = None
         candidate_sig_id = uuid4()
 
@@ -241,10 +254,25 @@ class OutboxRepository:
                         agent_verdict = %s,
                         agent_rationale = %s,
                         processed_at = clock_timestamp()
-                    WHERE outbox_id = %s;
+                    WHERE outbox_id = %s
+                      AND status = 'PROCESSING'
+                      AND lease_token = %s::UUID;
                     """,
-                    (assessment.verdict, assessment.rationale, item.outbox_id),
+                    (
+                        assessment.verdict,
+                        assessment.rationale,
+                        item.outbox_id,
+                        str(item.lease_token),
+                    ),
                 )
+
+                if cur.rowcount == 0:
+                    console.log(
+                        f"[yellow]Stale lease rejected for outbox_id={item.outbox_id} "
+                        f"(lease_token={item.lease_token}); skipping write-back.[/yellow]"
+                    )
+                    conn.commit()
+                    return None
 
                 if (
                     assessment.verdict == "CONFIRMED_FRAUD"

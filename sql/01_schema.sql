@@ -40,6 +40,7 @@ CREATE TABLE agent_triage_outbox (
     outbox_id BIGSERIAL PRIMARY KEY,
     tx_id UUID NOT NULL REFERENCES payment_ledger(tx_id) ON DELETE CASCADE,
     status VARCHAR(16) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED')),
+    lease_token UUID,
     payload JSONB NOT NULL,
     agent_verdict VARCHAR(24) CHECK (agent_verdict IN ('CONFIRMED_FRAUD', 'FALSE_POSITIVE')),
     agent_rationale TEXT,
