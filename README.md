@@ -260,7 +260,7 @@ In [`src/agent/triage_worker.py`](./src/agent/triage_worker.py), the evaluation 
 
 #### Phase 1 (`< 2 ms` DB Transaction): Lock-Free Claiming (`FOR UPDATE SKIP LOCKED`)
 
-`OutboxRepository.claim_pending_batch` grabs up to 5 `PENDING` rows from `agent_triage_outbox`, flips their status to `'PROCESSING'`, and **commits the transaction immediately**. Because the database transaction is closed before calling the AI model, **zero database locks are held** during the **`~3.5-second` (`3,543.6 ms`)** Gemini inference call (and if a worker crashes, `reclaim_stale_leases` resets rows older than 30 seconds back to `'PENDING'`).
+`OutboxRepository.claim_pending_batch` grabs up to 5 `PENDING` rows from `agent_triage_outbox`, flips their status to `'PROCESSING'`, stamps a per-claim fencing token (`lease_token = gen_random_uuid()`), and **commits the transaction immediately**. Because the database transaction is closed before calling the AI model, **zero database locks are held** during the **`~3.5-second` (`3,543.6 ms`)** Gemini inference call (and if a worker crashes, `reclaim_stale_leases` resets rows older than 30 seconds back to `'PENDING'` and clears `lease_token = NULL`).
 
 #### Phase 2 (Stateless Vertex AI Inference — Live Measured `~3.5 s`): The Forensic Prompt and Structured JSON Reasoning
 
@@ -311,7 +311,7 @@ In our live Vertex AI call (`3,543.6 ms`), **Gemini 4 Hydrogen** returned this e
 
 #### Phase 3 (`< 5 ms` DB Transaction): Vector Deduplication and Self-Immunization
 
-When `verdict == 'CONFIRMED_FRAUD'` and `confidence_score >= 0.85`, `OutboxRepository.complete_triage_and_immunize` marks the outbox row `'COMPLETED'` and inserts the payment's 64-D `behavioral_vec` into `fraud_signatures` (`source = 'GEMINI_AGENT_IMMUNIZED'`) with an **automatic `>= 0.98` cosine deduplication guard**:
+`OutboxRepository.complete_triage_and_immunize` marks the outbox row `'COMPLETED'` using a **fenced `UPDATE`** (`WHERE outbox_id = $1 AND status = 'PROCESSING' AND lease_token = $2::UUID`) — if `cur.rowcount == 0`, the worker's lease expired and was reclaimed by another worker, so the stale "zombie" worker aborts immediately without overwriting the outbox or touching `fraud_signatures`. Otherwise, when `verdict == 'CONFIRMED_FRAUD'` and `confidence_score >= 0.85`, it inserts the payment's 64-D `behavioral_vec` into `fraud_signatures` (`source = 'GEMINI_AGENT_IMMUNIZED'`) with an **automatic `>= 0.98` cosine deduplication guard**:
 
 ```sql
 INSERT INTO fraud_signatures (
@@ -569,7 +569,7 @@ The Entity-Relationship (ER) diagram below shows the three tables inside the dat
 1. **[`sql/01_schema.sql`](./sql/01_schema.sql): The Three Core Tables**
    - **`payment_ledger`:** Stores every instant transfer (`tx_id UUID PRIMARY KEY`, `sender_account_id`, `receiver_account_id`, `device_fingerprint`, `merchant_category`, `selectivity_bucket`, `amount_cents`, `tx_timestamp`, `behavioral_vec vector(64)`, `composite_risk_score`, and `decision`).
    - **`fraud_signatures`:** Stores confirmed 64-D fraud patterns (`signature_id UUID PRIMARY KEY`, `merchant_category`, `selectivity_bucket`, `created_at`, `source` in `'SEED_CORPUS' | 'CHURN_STREAM' | 'GEMINI_AGENT_IMMUNIZED'`, `behavioral_vec vector(64)`, and `pattern_description`).
-   - **`agent_triage_outbox`:** Stores suspicious grey-zone payments (`outbox_id BIGSERIAL PRIMARY KEY`, `tx_id` with `ON DELETE CASCADE`, `status` in `'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'`, `payload JSONB`, `agent_verdict`, `agent_rationale`, `created_at`, and `processed_at`) along with a partial index `idx_outbox_pending_poll` (`WHERE status IN ('PENDING', 'PROCESSING')`) so background workers find pending items and recover stalled leases in sub-millisecond time.
+   - **`agent_triage_outbox`:** Stores suspicious grey-zone payments (`outbox_id BIGSERIAL PRIMARY KEY`, `tx_id` with `ON DELETE CASCADE`, `status` in `'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'`, `lease_token UUID` for fencing stale workers, `payload JSONB`, `agent_verdict`, `agent_rationale`, `created_at`, and `processed_at`) along with a partial index `idx_outbox_pending_poll` (`WHERE status IN ('PENDING', 'PROCESSING')`) so background workers find pending items and recover stalled leases in sub-millisecond time.
 
 2. **[`sql/02_setup_alloydb.sql`](./sql/02_setup_alloydb.sql): AlloyDB Columnar Engine and `alloydb_scann` Setup**
    - Loads `alloydb_scann`, `google_columnar_engine`, and `google_ml_integration`.
@@ -613,9 +613,9 @@ The Entity-Relationship (ER) diagram below shows the three tables inside the dat
      - **`GenAISDKStrategy`:** Calls **Gemini 4 Hydrogen** (`gemini-4-hydrogen`) via the `google-genai` Python SDK with `response_mime_type="application/json"` and validates the response via `AgentAssessment`.
      - **`DeterministicLocalStrategy`:** Evaluates payloads locally without cloud credentials for offline testing and continuous integration (and automatically serves as a safe fallback if a remote AI call fails).
    - **`AgentTriageWorker.process_once`:** Executes the three-phase cycle:
-     1. **Phase 1 (Claim):** Reclaims stale leases older than 30 seconds, claims a batch of `PENDING` rows with `FOR UPDATE SKIP LOCKED`, sets `status = 'PROCESSING'`, and commits immediately (`< 2 ms`) so no row locks are held during AI inference.
+     1. **Phase 1 (Claim):** Reclaims stale leases older than 30 seconds (clearing `lease_token`), claims a batch of `PENDING` rows with `FOR UPDATE SKIP LOCKED`, sets `status = 'PROCESSING'` and `lease_token = gen_random_uuid()`, and commits immediately (`< 2 ms`) so no row locks are held during AI inference.
      2. **Phase 2 (Infer):** Runs `FraudInferenceStrategy.evaluate` completely outside any database transaction (`~3.5 s` live measured on Vertex AI `gemini-4-hydrogen`).
-     3. **Phase 3 (Immunize):** Calls `complete_triage_and_immunize` to mark the outbox row `'COMPLETED'` and, when `verdict == 'CONFIRMED_FRAUD'` and `confidence_score >= 0.85`, inserts the 64-D vector into `fraud_signatures` (`source = 'GEMINI_AGENT_IMMUNIZED'`) with the `>= 0.98` cosine deduplication check.
+     3. **Phase 3 (Immunize):** Calls `complete_triage_and_immunize` to execute a fenced `UPDATE` (`AND status = 'PROCESSING' AND lease_token = $2::UUID`) marking the outbox row `'COMPLETED'` (aborting if `rowcount == 0` to block zombie overwrites) and, when `verdict == 'CONFIRMED_FRAUD'` and `confidence_score >= 0.85`, inserts the 64-D vector into `fraud_signatures` (`source = 'GEMINI_AGENT_IMMUNIZED'`) with the `>= 0.98` cosine deduplication check.
 
 5. **[`src/benchmark/reporter.py`](./src/benchmark/reporter.py): Telemetry Aggregator and Markdown/CSV Exporter**
    - **`CsvTelemetryExporter` and `MarkdownReportFormatter`:** Aggregate the telemetry JSON files (`--inputs`) and generate [`results/benchmark_summary.md`](./results/benchmark_summary.md) and [`results/raw_telemetry.csv`](./results/raw_telemetry.csv).
